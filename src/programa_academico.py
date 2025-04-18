@@ -42,7 +42,7 @@ class ProgramaAcademico:
   def crear_conexion(this) -> None:
     this.context = zmq.Context()
     this.socket = this.context.socket(zmq.REQ)
-    this.socket.connect("tcp://127.0.0.1:5555")
+    this.socket.connect(f"tcp://{this.ip_puerto_facultad}")
 
   def enviar_info_programa_a_facultad(this) -> None:
     print("Enviando informacion de programa...")
@@ -57,8 +57,6 @@ class ProgramaAcademico:
 
 if __name__ == "__main__":
   programa_academico:ProgramaAcademico = ProgramaAcademico()
-  programa_academico.mostrar_info_programa()
-  print(programa_academico.obtener_info_programa_string())
   programa_academico.crear_conexion()
   programa_academico.enviar_info_programa_a_facultad()
   programa_academico.cerrar_conexion()

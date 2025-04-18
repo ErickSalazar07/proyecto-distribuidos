@@ -1,21 +1,22 @@
 import zmq
+from datetime import datetime,date
 
 class ProgramaAcademico:
 
 # Atributos de la clase
   nombre:str
-  semestre:str
+  semestre:date
   num_salones:int
   num_laboratorios:int
   ip_puerto_facultad:str
-  context:zmq.Context
-  socket:zmq.SyncSocket
+  context:zmq.Context # Crea sockets para el proceso actual.
+  socket_facultad:zmq.SyncSocket # Socket para comunicarse con las facultades.
 
 # Metodos de la clase
 
   def __init__(this):
     this.nombre = input("Dijite el nombre: ")
-    this.semestre = input("Dijite el semestre: ")
+    this.semestre = datetime.strptime(input("Dijite el semestre con formato (mm-yyyy): "),"%m-%Y").date()
     this.num_salones = int(input("Dijite el numero de salones: "))
     this.num_laboratorios = int(input("Dijite el numero de laboratorios: "))
     this.ip_puerto_facultad = input("Dijite la ip y el puerto de la facultad, con el formato(ip:puerto): ")
@@ -41,17 +42,28 @@ class ProgramaAcademico:
 
   def crear_conexion(this) -> None:
     this.context = zmq.Context()
-    this.socket = this.context.socket(zmq.REQ)
-    this.socket.connect(f"tcp://{this.ip_puerto_facultad}")
+    this.socket_facultad = this.context.socket(zmq.REQ)
+    this.socket_facultad.connect(f"tcp://{this.ip_puerto_facultad}")
 
   def enviar_info_programa_a_facultad(this) -> None:
-    print("Enviando informacion de programa...")
-    this.socket.send_string(this.obtener_info_programa_string())
+    print("Enviando informacion del programa en formato JSON...")
+    this.socket_facultad.send_json(this.transformar_info_diccionario())
     print("Informacion enviada.")
+    respuesta:str = this.socket_facultad.recv_string();
+    print("Respuesta: %s\n"%respuesta)
 
   def cerrar_conexion(this) -> None:
-    this.socket.close()
+    this.socket_facultad.close()
     this.context.term()
+    print("Comunicacion cerrada.")
+
+  def transformar_info_diccionario(this) -> dict:
+    return {
+      "nombre":this.nombre,
+      "semestre":this.semestre.strftime("%d-%m-%Y"),
+      "numSalones":this.num_salones,
+      "numLaboratorios":this.num_laboratorios
+    }
 
 # Seccion main del programa
 

@@ -43,7 +43,7 @@ class ProgramaAcademico:
   def crear_conexion(this) -> None:
     this.context = zmq.Context()
     this.socket_facultad = this.context.socket(zmq.REQ)
-    this.socket_facultad.connect(f"tcp://{this.ip_puerto_facultad}")
+    this.socket_facultad.connect(f"tcp://{this.ip_puerto_facultad}") # tcp://direccion_facultad:5555
 
   def enviar_info_programa_a_facultad(this) -> None:
     print("Enviando informacion del programa en formato JSON...")
@@ -59,7 +59,7 @@ class ProgramaAcademico:
 
   def transformar_info_diccionario(this) -> dict:
     return {
-      "nombre":this.nombre,
+      "nombrePrograma":this.nombre,
       "semestre":this.semestre.strftime("%d-%m-%Y"),
       "numSalones":this.num_salones,
       "numLaboratorios":this.num_laboratorios

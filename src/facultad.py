@@ -9,7 +9,7 @@ class Facultad:
   semestre:date
   ip_puerto_servidor:str
   context:zmq.Context
-  socket_servidor_pub:zmq.SyncSocket
+  socket_servidor_push:zmq.SyncSocket
   socket_servidor_sub:zmq.SyncSocket
   socket_programas:zmq.SyncSocket
 
@@ -23,28 +23,39 @@ class Facultad:
   def crear_comunicacion(this) -> None:
     this.context = zmq.Context()
     this.socket_programas = this.context.socket(zmq.REP)
-    #this.socket_servidor_pub = this.context.socket(zmq.PUB) # Socket publica al servidor.
-    #this.socket_servidor_sub = this.context.socket(zmq.SUB) # Socket recibe respuesta del servidor. 
+    this.socket_servidor_push = this.context.socket(zmq.PUSH) # Socket publica al servidor.
+    this.socket_servidor_sub = this.context.socket(zmq.SUB) # Socket recibe respuesta del servidor. 
     this.socket_programas.bind("tcp://*:5555")
-    #this.socket_servidor_pub.connect(f"tcp://{this.ip_puerto_servidor}")
-    #this.socket_servidor_sub.connect(f"tcp://{this.ip_puerto_servidor}")
-    #this.socket_servidor_sub.setsockopt(zmq.SUBSCRIBE,b"") # Se suscribe a todas las noticias.
+    this.socket_servidor_push.connect("tcp://localhost:5556")
+    this.socket_servidor_sub.connect("tcp://localhost:5557")
 
-  def comunicar_peticiones(this) -> bool:
-    print("Escuchando peticiones de los programas academicos...",end="")
-    peticion:dict = this.socket_programas.recv_json()
-    print("\n\nPeticion recibida.\n")
-    #this.socket_servidor_pub.send_json(peticion)
-    #respuesta:str = this.socket_servidor_sub.recv_string()
-    #if(respuesta.strip().lower() == "end"): return False
-    #print(f"Asignacion: {'Exitosa' if respuesta.lower() == 'si' else 'Fallida'}.\n")
-    print("Peticion:\n",peticion)
-    this.socket_programas.send_string("y")
-    return True
+  def recibir_peticion(this) -> dict:
+    print("Recibiendo peticion...")
+    peticion:dict = this.socket_programas.recv_json() # Recibe la peticion de algun programa academico
+    print("Peticion recibida.\n")
+    print("Peticion: ",peticion)
+    this.socket_programas.send_string("y") # Responde al programa academico con (y,n) si o no
+    peticion["nombreFacultad"] = this.nombre
+    return peticion
+
+  # TODO: Realizar implementacion
+  def enviar_peticion_servidor(this,peticion_enviar:dict) -> bool:
+    respuesta:str = str()
+    print("Peticion enviada al servidor...")
+    this.socket_servidor_push.send_json(peticion_enviar)
+    respuesta = this.socket_servidor_sub.setsockopt_string(zmq.SUBSCRIBE,f"{peticion_enviar['nombrePrograma']}")
+    print(f"Respuesta del servidor: {respuesta}")
+    return True if respuesta.lower() == "y" else False
+
+  def comunicar_peticiones(this) -> None:
+    print("Escuchando peticiones de los programas academicos.")
+    peticion_programa:dict = dict()
+    while (peticion_programa := this.recibir_peticion()) != None:
+      this.enviar_peticion_servidor(peticion_programa)
 
   def cerrar_comunicacion(this) -> None:
     this.socket_programas.close()
-    this.socket_servidor_pub.close()
+    this.socket_servidor_push.close()
     this.socket_servidor_sub.close()
     this.context.term()
 
@@ -53,5 +64,5 @@ class Facultad:
 if __name__ == "__main__":
   facultad:Facultad = Facultad()
   facultad.crear_comunicacion()
-  while facultad.comunicar_peticiones(): pass
+  facultad.comunicar_peticiones()
   facultad.cerrar_comunicacion()

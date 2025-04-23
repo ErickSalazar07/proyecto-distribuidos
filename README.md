@@ -1,36 +1,68 @@
 # Proyecto Sistemas Distribuidos
 
-## Integrantes.
+## Índice
+
+- [Integrantes](#integrantes)
+- [Descripción del proyecto](#descripción-del-proyecto)
+- [Instalación y ejecución](#instalación-y-ejecución)
+- [Diagrama de clases](#diagrama-de-clases)
+- [Diagrama de despliegue](#diagrama-de-despliegue)
+
+---
+
+## Integrantes
 
 - Erick Salazar Suarez
 - Nicolas Polanco Algarra
 - Jorge Sierra Laiton
 
-## Descripcion del proyecto.
-Sistema que permita la coordinacion y reserva de salas de estudio.
+---
 
-## Instalacion y ejecuccion del proyecto.
+## Descripción del proyecto
+
+Sistema que permite la coordinación y reserva de salas de estudio mediante procesos distribuidos con comunicación síncrona y asíncrona.
+
+---
+
+## Instalación y ejecución
+
+Para instalar las dependencias necesarias, ejecutar:
 
 ```bash
 pip install pyzmq
 ```
 
-### Ejecucion de `programa_academico.py`
+Para ejecutar cada componente del proyecto, utilizar los siguientes comandos en la raíz del proyecto:
+
+### Programa académico
 ```bash
-python src/programa_academico.py
+python src/rep-req-asinc/programa_academico.py
+```
+### Facultad
+```bash
+python src/rep-req-asinc/facultad.py
+```
+### Servidor central
+```bash
+python src/rep-req-asinc/servidor_central.py
+```
+### Servidor respaldo
+```bash
+python src/rep-req-asinc/servidor_respaldo.py
+```
+### Health checker
+```bash
+python src/rep-req-asinc/health_checker.py
 ```
 
-### Ejecucion de `facultad.py`
-```bash
-python src/facultad.py
-```
+---
 
-### Ejecucion de `servidor_central.py`
-```bash
-python src/servidor_central.py
-```
+## Diagrama de clases
 
-### Ejecucion de `servidor_backup.py`
-```bash
-python src/servidor_backup.py
-```
+![Diagrama de clases](diagramas/clases.png)
+
+---
+
+## Diagrama de despliegue
+
+![Diagrama de despliegue](diagramas/despliegue.png)

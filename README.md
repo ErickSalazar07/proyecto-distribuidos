@@ -66,3 +66,9 @@ python src/rep-req-asinc/health_checker.py
 ## Diagrama de despliegue
 
 ![Diagrama de despliegue](diagramas/despliegue.png)
+
+---
+
+## Diagrama de Secuencia
+
+![Diagrama de secuencia](diagramas/secuencia.png)

@@ -1,5 +1,14 @@
 import zmq
 
+# Colores para visualizar mejor la salida estandar.
+RED = "\033[91m"
+GREEN = "\033[92m"
+YELLOW = "\033[93m"
+BLUE = "\033[94m"
+MAGENTA = "\033[95m"
+CYAN = "\033[96m"
+RESET = "\033[0m"
+
 class ServidorCentral:
 
   num_salones:int
@@ -14,16 +23,16 @@ class ServidorCentral:
   def crear_comunicacion(self) -> None:
     self.context = zmq.Context()
     self.socket_facultades = self.context.socket(zmq.ROUTER)
-    self.socket_facultades.bind("tcp://*:5556")
+    self.socket_facultades.bind("tcp://*:5555")
 
   def escuchar_peticiones(self) -> None:
-    print("Escuchando peticiones de las facultades...")
+    print(f"{CYAN}Escuchando peticiones de las facultades en el puerto: 5555...{RESET}")
     while True:
       identity, raw_msg = self.socket_facultades.recv_multipart()
       peticion = zmq.utils.jsonapi.loads(raw_msg)
 
-      print(f"Petición de {peticion['nombreFacultad']} - Programa {peticion['nombrePrograma']}")
-      print(peticion)
+      print(f"{YELLOW}Petición de {peticion['nombreFacultad']} - Programa {peticion['nombrePrograma']}{RESET}")
+      print(f"{MAGENTA}Contenido: {peticion}{RESET}")
 
       num_salones_pedido = peticion.get("numSalones", 0)
       num_laboratorios_pedido = peticion.get("numLaboratorios", 0)
@@ -44,6 +53,18 @@ class ServidorCentral:
         identity,
         zmq.utils.jsonapi.dumps(respuesta)
       ])
+
+      if reserva_exitosa:
+        # Esperar confirmación de aceptación de la facultad
+        _, raw_confirmacion = self.socket_facultades.recv_multipart()
+        confirmacion = zmq.utils.jsonapi.loads(raw_confirmacion)
+        if confirmacion.get("confirmacion") == "aceptada":
+          print(f"{GREEN}La facultad confirmó la reserva.{RESET}")
+        else:
+          print(f"{RED}La facultad rechazó la reserva.{RESET}") # Devolvemos recursos asignados
+          self.num_salones += num_salones_pedido
+          self.num_laboratorios += num_laboratorios_pedido
+
 
   def cerrar_comunicacion(self) -> None:
     self.socket_facultades_pub.close()

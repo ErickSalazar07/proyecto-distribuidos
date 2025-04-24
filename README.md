@@ -5,8 +5,7 @@
 - [Integrantes](#integrantes)
 - [Descripción del proyecto](#descripción-del-proyecto)
 - [Instalación y ejecución](#instalación-y-ejecución)
-- [Diagrama de clases](#diagrama-de-clases)
-- [Diagrama de despliegue](#diagrama-de-despliegue)
+- [Diagramas del sistema](#digramas-del-sistema)
 
 ---
 
@@ -57,18 +56,26 @@ python src/rep-req-asinc/health_checker.py
 
 ---
 
-## Diagrama de clases
+## Digramas del Sistema
+
+### Diagrama de clases
 
 ![Diagrama de clases](diagramas/clases.png)
 
 ---
 
-## Diagrama de despliegue
+### Diagrama de despliegue
 
 ![Diagrama de despliegue](diagramas/despliegue.png)
 
 ---
 
-## Diagrama de Secuencia
+### Diagrama de Secuencia
 
 ![Diagrama de secuencia](diagramas/secuencia.png)
+
+---
+
+### Diagrama de Componentes
+
+![Digrama de componentes](diagramas/componentes.png)

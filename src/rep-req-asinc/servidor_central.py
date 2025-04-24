@@ -19,6 +19,7 @@ class ServidorCentral:
   def __init__(self):
     self.num_salones = int(input("Dijite el numero de salones: "))
     self.num_laboratorios = int(input("Dijite el numero de laboratorios: "))
+    self.solicitudes_fallidas = []
 
   def crear_comunicacion(self) -> None:
     self.context = zmq.Context()
@@ -31,7 +32,11 @@ class ServidorCentral:
       identity, raw_msg = self.socket_facultades.recv_multipart()
       peticion = zmq.utils.jsonapi.loads(raw_msg)
 
-      print(f"{YELLOW}Petición de {peticion['nombreFacultad']} - Programa {peticion['nombrePrograma']}{RESET}")
+      if isinstance(peticion, dict) and 'nombreFacultad' in peticion and 'nombrePrograma' in peticion:
+        print(f"{YELLOW}Petición de {peticion['nombreFacultad']} - Programa {peticion['nombrePrograma']}{RESET}")
+      else:
+        print(f"{RED}Petición recibida malformada o incompleta: {peticion}{RESET}")
+        continue  
       print(f"{MAGENTA}Contenido: {peticion}{RESET}")
 
       num_salones_pedido = peticion.get("numSalones", 0)
@@ -42,6 +47,9 @@ class ServidorCentral:
         self.num_salones -= num_salones_pedido
         self.num_laboratorios -= num_laboratorios_pedido
         reserva_exitosa = True
+      else:
+        self.solicitudes_fallidas.append(peticion)
+        print(f"{RED}Solicitud no atendida guardada en lista de peticiones fallidas.{RESET}")
 
       respuesta = {
         "respuesta": "y" if reserva_exitosa else "n",
@@ -67,12 +75,18 @@ class ServidorCentral:
 
 
   def cerrar_comunicacion(self) -> None:
-    self.socket_facultades_pub.close()
-    self.socket_facultades_sub.close()
+    self.socket_facultades.close();
     self.context.term()
 
 if __name__ == "__main__":
-  servidor_central:ServidorCentral = ServidorCentral()
+  servidor_central = ServidorCentral()
   servidor_central.crear_comunicacion()
-  servidor_central.escuchar_peticiones()
-  servidor_central.cerrar_comunicacion()
+  try:
+    servidor_central.escuchar_peticiones()
+  except KeyboardInterrupt:
+    print(f"\n{RED}Servidor detenido manualmente.{RESET}")
+    print(f"{YELLOW}Solicitudes fallidas almacenadas:{RESET}")
+    for idx, solicitud in enumerate(servidor_central.solicitudes_fallidas, 1):
+      print(f"{idx}. {solicitud}")
+  finally:
+    servidor_central.cerrar_comunicacion()

@@ -80,5 +80,9 @@ class Facultad:
 if __name__ == "__main__":
   facultad:Facultad = Facultad()
   facultad.crear_comunicacion()
-  facultad.comunicar_peticiones()
-  facultad.cerrar_comunicacion()
+  try:
+    facultad.comunicar_peticiones()
+  except KeyboardInterrupt:
+    print(f"\n{YELLOW}Facultad detenido manualmente.{RESET}")
+  finally:
+    facultad.cerrar_comunicacion()

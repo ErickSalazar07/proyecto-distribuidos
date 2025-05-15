@@ -1,5 +1,6 @@
-import zmq
 from datetime import datetime,date
+import zmq
+import sys
 
 # Colores para visualizar mejor la salida estandar.
 RED = "\033[91m"
@@ -25,10 +26,52 @@ class Facultad:
 # Metodos de la clase
 
   def __init__(self):
-    self.nombre = input("Dijite el nombre de la facultad: ")
-    self.semestre = datetime.strptime(input("Dijite el semestre en formato (mm-yyyy): "),"%m-%Y").date()
-    self.ip_puerto_servidor = input("Dijite la ip y el puerto del servidor con el formato(ip:puerto): ")
-    self.puerto_escuchar_programas = input("Dijite el puerto por el cual escuchar a los programas(puerto > 5555): ")
+
+    if len(sys.argv) != 9:
+      print(f"Error: El numero de argumentos no es valido. Recuerde.\n\n")
+      self.error_args()
+      sys.exit(-1)
+
+    self.nombre = ""
+    self.semestre = None
+    self.ip_puerto_servidor = ""
+    self.puerto_escuchar_programas = ""
+
+    for i in range(1,len(sys.argv)):
+      if sys.argv[i] == "-n":
+        self.nombre = sys.argv[i+1]
+      elif sys.argv[i] == "-s":
+        self.semestre = datetime.strptime(sys.argv[i+1],"%m-%Y").date()
+      elif sys.argv[i] == "-ip-p-s":
+        self.ip_puerto_servidor = sys.argv[i+1]
+      elif sys.argv[i] == "-puerto-escuchar":
+        self.puerto_escuchar_programas = sys.argv[i+1]
+
+    if not self.campos_validos():
+      print(f"Error: Los campos no son validos. Recuerde.\n\n")
+      self.error_args()
+      sys.exit(-2)
+
+    print("Informacion de la facultad:\n")
+    print(self)
+
+  def error_args(self):
+    print(f"Debe ingresar las banderas/opciones y sus argumentos correspondientes.\n")
+    print(f"-n \"nombre_facultad\": Es el nombre de la facultad")
+    print(f"-s \"mm-yyyy\": Es el semestre, el cual debe seguir el formato propuesto")
+    print(f"-ip-p-s \"ip_servidor:puerto_servidor\": Es la ip y el puerto del servidor separados por ':'")
+    print(f"-puerto-escuchar \"puerto_escuchar_programas\": Es el puerto por el cual la facultad va a escuchar las peticiones de los programas")
+
+  def campos_validos(self) -> bool:
+    return self.nombre != "" and self.semestre != None and self.ip_puerto_servidor != "" \
+    and self.puerto_escuchar_programas != ""
+
+  def __str__(self) -> str:
+    return\
+      f"Nombre: {self.nombre}\n"\
+    + f"Semestre: {self.semestre}\n"\
+    + f"Ip servidor: Puerto servidor => {self.ip_puerto_servidor}\n"\
+    + f"Puerto escuchar peticions programas: {self.puerto_escuchar_programas}\n\n"
 
   def crear_comunicacion(self) -> None:
     self.context = zmq.Context()

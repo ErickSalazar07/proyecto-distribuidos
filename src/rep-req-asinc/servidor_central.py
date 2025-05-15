@@ -1,4 +1,5 @@
 import zmq
+import sys
 
 # Colores para visualizar mejor la salida estandar.
 RED = "\033[91m"
@@ -13,13 +14,50 @@ class ServidorCentral:
 
   num_salones:int
   num_laboratorios:int
+  solicitudes_fallidas:list
   context:zmq.Context
   socket_facultades:zmq.Socket
 
   def __init__(self):
-    self.num_salones = int(input("Dijite el numero de salones: "))
-    self.num_laboratorios = int(input("Dijite el numero de laboratorios: "))
-    self.solicitudes_fallidas = []
+
+    if len(sys.argv) != 5:
+      print("Error: El numero de argumentos no coinciden. Recuerde.\n")
+      self.error_args()
+      sys.exit(-1)
+
+    self.num_salones = 0
+    self.num_laboratorios = 0
+    self.solicitudes_fallidas = list()
+    self.context = None
+    self.socket_facultades = None
+
+    for i in range(1,len(sys.argv)):
+      if sys.argv[i] == "-n-s":
+        self.num_salones = int(sys.argv[i+1])
+      elif sys.argv[i] == "-n-l":
+        self.num_laboratorios = int(sys.argv[i+1])
+
+    if not self.campos_validos():
+      print("Error: Hay campos que no son validos. Recuerde.\n")
+      self.error_args()
+      sys.exit(-2)
+    
+    print("Informacion del servidor.\n\n")
+    print(self)
+    
+
+  def __str__(self) -> str:
+    return\
+    f"Numero salones: {self.num_salones}\n"\
+    f"Numero laboratorios: {self.num_laboratorios}\n\n"
+
+  def error_args(self):
+    print(f"Ingresar banderas/opciones junto con sus argumentos correspondientes.\n")
+    print(f"-n-s \"numero_salones\": Es el numero de salones que tiene el servidor")
+    print(f"-n-l \"numero_laboratorios\": Es el numero de laboratorios que tiene el servidor")
+
+  def campos_validos(self) -> bool:
+    return self.num_salones > 0 and self.num_laboratorios > 0
 
   def crear_comunicacion(self) -> None:
     self.context = zmq.Context()

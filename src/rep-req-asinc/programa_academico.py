@@ -25,7 +25,7 @@ class ProgramaAcademico:
     self.socket_facultad = None
 
     if len(sys.argv) != 11:
-      print(f"Error: Ingreso un numero invalido de argumentos. Verifique.\n")
+      print("Error: Ingreso un numero invalido de argumentos. Verifique.\n")
       self.error_args()
       sys.exit(-3)
 
@@ -42,7 +42,7 @@ class ProgramaAcademico:
         self.ip_puerto_facultad = sys.argv[i+1]
 
     if not self.campos_validos():
-      self.mostrar_info_programa()
+      print(self)
       print(f"Error: Ingreso una opcion/bandera erronea")
       self.error_args()
       sys.exit(-2)
@@ -51,15 +51,15 @@ class ProgramaAcademico:
     print(self)
 
   def campos_validos(self) -> bool:
-    return self.nombre != "" and self.semestre is not None and self.num_salones > 0\
-    and self.num_laboratorios > 0 and self.ip_puerto_facultad != ""
+    return self.nombre != "" and self.semestre is not None and 7 <= self.num_salones <= 10\
+    and 2 <= self.num_laboratorios <= 4 and self.ip_puerto_facultad != ""
 
   def error_args(self):
     print(f"Recuerde ingresar todos los argumentos incluidas las banderas:\n\n")
     print(f"-n \"nombre_programa\": Es el nombre del programa academico")
     print(f"-s \"mm-yyyy\": Es la fecha del semestre")
-    print(f"-num-s \"numero_salones\": Es el numero de salones")
-    print(f"-num-l \"numero_laboratorios\": Es el numero de laboratorios")
+    print(f"-num-s \"numero_salones\": Es el numero de salones(entre 7 y 10)")
+    print(f"-num-l \"numero_laboratorios\": Es el numero de laboratorios(entre 2 y 4)")
     print(f"-ip-p-f \"ip_facultad:puerto_facultad\": Es la ip y el puerto de la facultad")
 
   def __str__(self) -> str:

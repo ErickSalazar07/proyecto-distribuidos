@@ -18,10 +18,12 @@ class Facultad:
   nombre:str
   semestre:date
   ip_puerto_servidor:str
+  ip_puerto_health_checker:str
   puerto_escuchar_programas:str
   context:zmq.Context
   socket_servidor:zmq.Socket
   socket_programas:zmq.Socket
+  socket_health_checker:zmq.Socket
 
 # Metodos de la clase
 
@@ -35,7 +37,13 @@ class Facultad:
     self.nombre = ""
     self.semestre = None
     self.ip_puerto_servidor = ""
+    #self.ip_puerto_health_checker = "10.43.96.80:5553"
+    self.ip_puerto_health_checker = "localhost:5553"
     self.puerto_escuchar_programas = ""
+    self.context = None
+    self.socket_servidor = None
+    self.socket_programas = None
+    self.socket_health_checker = None
 
     for i in range(1,len(sys.argv)):
       if sys.argv[i] == "-n":
@@ -54,6 +62,33 @@ class Facultad:
 
     print("Informacion de la facultad:\n")
     print(self)
+  
+  def guardar_peticion_archivo(self,peticion:dict):
+    nombre_archivo = f"{peticion['semestre']}.txt"
+    peticion_txt = f"Programa Academico: {peticion['nombrePrograma']}, Salones: {peticion['numSalones']}, Laboratorios: {peticion['numLaboratorios']}\n"
+
+    try:
+      with open(nombre_archivo,"a") as archivo:
+        archivo.write(peticion_txt)
+      print(f"Petición guardada en {nombre_archivo}")
+    except Exception as e:
+      print(f"Error al guardar la petición: {e}")
+
+  def actualizar_servidor_activo(self,estado):
+    ip_puerto = estado["ipPuerto"]
+    if hasattr(self,"ip_puerto_servidor") and self.ip_puerto_servidor == ip_puerto:
+      return
+
+    try:
+      if hasattr(self,"socket_servidor"):
+        self.socket_servidor.close()
+      
+      self.socket_servidor = self.context.socket(zmq.DEALER)
+      self.socket_servidor.connect(f"tcp://{ip_puerto}")
+      self.ip_puerto_servidor = ip_puerto
+      print(f"{GREEN}✅ Conectado al servidor {estado['servidor_activo']} ({ip_puerto}){RESET}")
+    except Exception as e:
+      print(f"{RED}Error al conectar al servidor {ip_puerto}: {e}{RESET}")
 
   def error_args(self):
     print(f"Debe ingresar las banderas/opciones y sus argumentos correspondientes.\n")
@@ -74,11 +109,36 @@ class Facultad:
     + f"Puerto escuchar peticions programas: {self.puerto_escuchar_programas}\n\n"
 
   def crear_comunicacion(self) -> None:
+    # Se crea el context(clase para manejar instancias de los diferentes sockets)
     self.context = zmq.Context()
+    
+    # Se inicializa el canal para la comunicacion con programas
     self.socket_programas = self.context.socket(zmq.REP) # Socket sincrono. 
-    self.socket_servidor = self.context.socket(zmq.DEALER) # Socket asincrono.
     self.socket_programas.bind(f"tcp://*:{self.puerto_escuchar_programas}")
+    
+    # Se inicializa el canal para comunicarse con el health_checker
+    self.socket_health_checker = self.context.socket(zmq.SUB)
+    self.socket_health_checker.connect(f"tcp://{self.ip_puerto_health_checker}")
+    self.socket_health_checker.setsockopt_string(zmq.SUBSCRIBE,"")
+
+    # Se crea un canal y se inicializa en el ip y puerto que se ingresan por comando
+    self.socket_servidor = self.context.socket(zmq.DEALER)
     self.socket_servidor.connect(f"tcp://{self.ip_puerto_servidor}")
+    self.iniciar_escucha_health_checker()
+
+    # Inicia hilo para escuchar actualizaciones
+
+  def iniciar_escucha_health_checker(self):
+    import threading
+    def escuchar_actualizaciones():
+      while True:
+        try:
+          estado = self.socket_health_checker.recv_json()
+          print(f"{CYAN}Actualizacion recibida del health_checker: {estado}{RESET}")
+          self.actualizar_servidor_activo(estado)
+        except Exception as e:
+          print(f"{RED}Error al recibir actualizacion: {e}{RESET}")
+    threading.Thread(target=escuchar_actualizaciones,daemon=True).start()
 
   def recibir_peticion(self) -> dict:
     print(f"{CYAN}Recibiendo peticion en el puerto: {self.puerto_escuchar_programas}...{RESET}")
@@ -86,25 +146,29 @@ class Facultad:
     print(f"{GREEN}Peticion recibida.\n{RESET}")
     print(f"{YELLOW}Peticion: {peticion}{RESET}")
     self.socket_programas.send_string("y") # Responde al programa academico con (y,n) si o no
+    self.guardar_peticion_archivo(peticion)
     peticion["nombreFacultad"] = self.nombre
     return peticion
 
   def enviar_peticion_servidor(self, peticion_enviar: dict) -> bool:
-    print(f"{MAGENTA}Peticion enviada al servidor (comunicacion asincrona)...{RESET}")
-    self.socket_servidor.send_json(peticion_enviar)
-    respuesta = self.socket_servidor.recv_json()
-    print(f"{BLUE}Respuesta del servidor: {respuesta}{RESET}")
-
-    if respuesta.get("respuesta", "").lower() == "y":
-      # Por ahora se acepta automáticamente
-      print(f"{GREEN}Reserva aceptada por la facultad.{RESET}")
-      confirmacion = {"confirmacion": "aceptada"}
-    else:
-      print(f"{RED}La reserva no fue aprobada por el servidor.{RESET}")
-      confirmacion = {"confirmacion": "rechazada"}
-
-    self.socket_servidor.send_json(confirmacion)
-    return respuesta.get("respuesta", "").lower() == "y"
+    if not hasattr(self, 'socket_servidor') or self.socket_servidor.closed:
+      print(f"{RED}Error: No hay conexión activa con el servidor{RESET}")
+      return False
+    print(f"{MAGENTA}Enviando petición a servidor...{RESET}")
+    try:
+        # Envía la petición como mensaje multipart (necesario para ROUTER-DEALER)
+        self.socket_servidor.send_json(peticion_enviar)
+        if self.socket_servidor.poll(timeout=5000):  # Timeout de 5 segundos
+          respuesta = self.socket_servidor.recv_json()
+          print(f"{BLUE}Respuesta del servidor: {respuesta}{RESET}")
+            # Procesar respuesta...
+          return respuesta.get("respuesta", "").lower() == "y"
+        else:
+          print(f"{RED}Timeout: No se recibió respuesta del servidor{RESET}")
+          return False
+    except Exception as e:
+      print(f"{RED}Error al enviar petición: {e}{RESET}")
+      return False
 
 
   def comunicar_peticiones(self) -> None:
@@ -116,6 +180,7 @@ class Facultad:
   def cerrar_comunicacion(self) -> None:
     self.socket_programas.close()
     self.socket_servidor.close()
+    self.socket_health_checker.close()
     self.context.term()
 
 # Seccion main del programa

@@ -1,5 +1,6 @@
-import zmq
 from datetime import datetime,date
+import zmq
+import sys
 
 class ProgramaAcademico:
 
@@ -15,30 +16,59 @@ class ProgramaAcademico:
 # Metodos de la clase
 
   def __init__(self):
-    self.nombre = input("Dijite el nombre: ")
-    self.semestre = datetime.strptime(input("Dijite el semestre con formato (mm-yyyy): "),"%m-%Y").date()
-    self.num_salones = int(input("Dijite el numero de salones: "))
-    self.num_laboratorios = int(input("Dijite el numero de laboratorios: "))
-    self.ip_puerto_facultad = input("Dijite la ip y el puerto de la facultad, con el formato(ip:puerto): ")
+    self.nombre = ""
+    self.semestre = None
+    self.num_salones = 0
+    self.num_laboratorios = 0
+    self.ip_puerto_facultad = ""
+    self.context = None
+    self.socket_facultad = None
 
-  def mostrar_info_programa(self) -> None:
-    print(
-      f"""
-      Nombre: {self.nombre}
-      Semestre: {self.semestre}
-      Numero Salones: {self.num_salones}
-      Numero Laboratorios: {self.num_laboratorios}
-      Ip y Puerto de Facultad: {self.ip_puerto_facultad}
-      """)
+    if len(sys.argv) != 11:
+      print("Error: Ingreso un numero invalido de argumentos. Verifique.\n")
+      self.error_args()
+      sys.exit(-3)
 
-  def obtener_info_programa_string(self) -> str:
-    return f"""
-      Nombre: {self.nombre}
-      Semestre: {self.semestre}
-      Numero Salones: {self.num_salones}
-      Numero Laboratorios: {self.num_laboratorios}
-      Ip y Puerto de Facultad: {self.ip_puerto_facultad}
-      """
+    for i in range(1,len(sys.argv)):
+      if sys.argv[i] == "-n":
+        self.nombre = sys.argv[i+1]
+      elif sys.argv[i] == "-s":
+        self.semestre = datetime.strptime(sys.argv[i+1],"%m-%Y").date()
+      elif sys.argv[i] == "-num-s":
+        self.num_salones = int(sys.argv[i+1])
+      elif sys.argv[i] == "-num-l":
+        self.num_laboratorios = int(sys.argv[i+1])
+      elif sys.argv[i] == "-ip-p-f":
+        self.ip_puerto_facultad = sys.argv[i+1]
+
+    if not self.campos_validos():
+      print(self)
+      print(f"Error: Ingreso una opcion/bandera erronea")
+      self.error_args()
+      sys.exit(-2)
+    
+    print("Informacion del programa academico.\n\n")
+    print(self)
+
+  def campos_validos(self) -> bool:
+    return self.nombre != "" and self.semestre is not None and 7 <= self.num_salones <= 10\
+    and 2 <= self.num_laboratorios <= 4 and self.ip_puerto_facultad != ""
+
+  def error_args(self):
+    print(f"Recuerde ingresar todos los argumentos incluidas las banderas:\n\n")
+    print(f"-n \"nombre_programa\": Es el nombre del programa academico")
+    print(f"-s \"mm-yyyy\": Es la fecha del semestre")
+    print(f"-num-s \"numero_salones\": Es el numero de salones(entre 7 y 10)")
+    print(f"-num-l \"numero_laboratorios\": Es el numero de laboratorios(entre 2 y 4)")
+    print(f"-ip-p-f \"ip_facultad:puerto_facultad\": Es la ip y el puerto de la facultad")
+
+  def __str__(self) -> str:
+    return\
+      f"Nombre: {self.nombre}\n"\
+      f"Semestre: {self.semestre}\n"\
+      f"Numero Salones: {self.num_salones}\n"\
+      f"Numero Laboratorios: {self.num_laboratorios}\n"\
+      f"Ip y Puerto de Facultad: {self.ip_puerto_facultad}\n\n"\
 
   def crear_conexion(self) -> None:
     self.context = zmq.Context()

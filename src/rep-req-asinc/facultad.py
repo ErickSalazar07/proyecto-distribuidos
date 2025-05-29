@@ -213,7 +213,7 @@ class Facultad:
     self.ip_puerto_servidor = respuesta.get("ipPuerto")
     print(f"Servidor activo: {respuesta.get("servidorActivo")}")
     print(f"Respuesta: {respuesta}")
-
+    
   def recibir_peticion(self) -> dict:
     print(f"{CYAN}Recibiendo peticion en el puerto: {self.puerto_escuchar_programas}...{RESET}")
     respuesta_cifrada = self.socket_programas.recv() 

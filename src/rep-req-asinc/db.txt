@@ -1,2 +1,0 @@
-Salones: 380
-Laboratorios: 60

@@ -2,6 +2,7 @@ import zmq
 import sys
 import time
 import threading
+import collections
 
 # Colores para visualizar mejor la salida estandar.
 RED = "\033[91m"
@@ -121,16 +122,33 @@ class ServidorCentral:
   def escuchar_peticiones(self) -> None:
     print(f"{CYAN}Escuchando peticiones de las facultades en el puerto: 5555...{RESET}")
     
+    # Protección DDoS: umbral y ventana de tiempo
+    registro_tasa = collections.defaultdict(list)
+    UMBRAL_PETICIONES = 10
+    VENTANA_SEGUNDOS = 5
+
     while True:
       identity, raw_msg = self.socket_facultades.recv_multipart()
+
+      # Marcar el tiempo actual
+      ahora = time.time()
+      registro_tasa[identity].append(ahora)
+      # Limpiar registros viejos fuera de la ventana
+      registro_tasa[identity] = [t for t in registro_tasa[identity] if ahora - t <= VENTANA_SEGUNDOS]
+
+      if len(registro_tasa[identity]) > UMBRAL_PETICIONES:
+        print(f"{RED}[DDoS] Demasiadas peticiones de una misma identidad. Petición descartada.{RESET}")
+        continue
+
+      # Procesar petición normalmente
       peticion = zmq.utils.jsonapi.loads(raw_msg)
       if isinstance(peticion, dict) and 'nombreFacultad' in peticion and 'nombrePrograma' in peticion:
         print(f"{YELLOW}Petición de {peticion['nombreFacultad']} - Programa {peticion['nombrePrograma']}{RESET}")
       else:
-        print(f"{RED}Petición recibida malformada o incompleta: {peticion}{RESET}")
-        continue  
-      print(f"{MAGENTA}Contenido: {peticion}{RESET}")
+        print(f"{RED}Petición malformada o incompleta: {peticion}{RESET}")
+        continue
 
+      print(f"{MAGENTA}Contenido: {peticion}{RESET}")
       reserva_exitosa:bool = self.reservar_peticion(peticion)
       respuesta = {
         "respuesta": "y" if reserva_exitosa else "n",
@@ -138,21 +156,19 @@ class ServidorCentral:
         "laboratoriosDisponibles": self.num_laboratorios
       }
 
-      self.socket_facultades.send_json(respuesta)
-      self.socket_facultades.send_multipart([identity,zmq.utils.jsonapi.dumps(respuesta)])
+      self.socket_facultades.send_multipart([identity, zmq.utils.jsonapi.dumps(respuesta)])
 
       if reserva_exitosa:
-        # Esperar confirmación de aceptación de la facultad
         _, raw_confirmacion = self.socket_facultades.recv_multipart()
         confirmacion = zmq.utils.jsonapi.loads(raw_confirmacion)
         if confirmacion.get("confirmacion") == True:
           print(f"{GREEN}La facultad confirmó la reserva.{RESET}")
           self.guardar_peticion_db(peticion)
         else:
-          print(f"{RED}La facultad rechazó la reserva.{RESET}") # Devolvemos recursos asignados
+          print(f"{RED}La facultad rechazó la reserva.{RESET}")
           self.num_salones += peticion.get("numSalones",0)
           self.num_laboratorios += peticion.get("numLaboratorios",0)
-
+          
   def cerrar_comunicacion(self) -> None:
     self.socket_facultades.close()
     self.socket_health_checker.close()

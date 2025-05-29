@@ -22,7 +22,7 @@ class HealthChecker:
     #self.ip_puerto_servidor_principal = "10.43.96.68:5555"
     #self.ip_puerto_servidor_auxiliar = "10.43.96.80:5555"
     self.ip_puerto_servidor_principal = "localhost:5555"
-    self.ip_puerto_servidor_auxiliar = "localhost:5555"
+    self.ip_puerto_servidor_auxiliar = "localhost:5572"
     self.puerto_escuchar_facultades = "5552"
     self.puerto_publicaciones = "5553"
     self.context = None
@@ -46,7 +46,7 @@ class HealthChecker:
 
 
     self.socket_arranque = self.context.socket(zmq.PUB)
-    self.socket_arranque.bind("tcp://*:5513")
+    self.socket_arranque.bind("tcp://*:5516")
 
   def comunicar_estado(self):
     while True:
@@ -79,15 +79,15 @@ class HealthChecker:
 
         if mensaje.get("estado") == "ok":
           self.servidor_activo = "principal"
-          self.socket_arranque.send_string(f"estado WAIT")
+          self.socket_arranque.send_string("WAIT")
         else:
           self.servidor_activo = "auxiliar"
-          self.socket_arranque.send_string("estado START")
+          self.socket_arranque.send_string("START")
         print(f"🔁 Servidor activo: {self.servidor_activo}\n")
       else:
         print("❌ No se recibió ping en 3.5 segundos. Cambiando de servidor...")
         self.servidor_activo = "auxiliar"
-        self.socket_arranque.send_string("estado START")
+        self.socket_arranque.send_string("START")
         print(f"⚠️ Nuevo servidor activo: {self.servidor_activo}\n")
 
 # Pseudo codigo:

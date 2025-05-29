@@ -14,7 +14,7 @@ CYAN = "\033[96m"
 RESET = "\033[0m"
 
 CANT_WORKERS = 10
-HEALTH_CHECKER_ADDR = "tcp://localhost:5513"
+HEALTH_CHECKER_ADDR = "tcp://localhost:5516"
 
 class ServidorCentral:
 
@@ -225,10 +225,9 @@ def traer_archivo_central():
 def main():
     # REQ socket hacia el Health Checker
     ctx_hc = zmq.Context()
-    sub = ctx.socket(zmq.SUB)
-    sub.connect(HEALTH_ADDR)
-    sub.setsockopt_string(zmq.SUBSCRIBE, "estado")  # recibe todo
-
+    sub = ctx_hc.socket(zmq.SUB)
+    sub.connect(HEALTH_CHECKER_ADDR)
+    sub.setsockopt_string(zmq.SUBSCRIBE, "")  # recibe todo
 
     server_thread = None
     stop_event = threading.Event()

@@ -18,7 +18,7 @@ class Broker:
         self.ip_puerto_health_checker = "localhost:5553"
         # Puerto en el que el broker recibirá peticiones de las Facultades
         # (debe coincidir con lo que ellas usan en "-ip-p-s")
-        self.puerto_escuchar_facultad = "5555"
+        self.puerto_escuchar_facultad = "5513"
 
         # Contexto y sockets de ZeroMQ
         self.context = None

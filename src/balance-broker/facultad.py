@@ -17,8 +17,7 @@ class Facultad:
 
   nombre:str
   semestre:date
-  ip_puerto_servidor:str
-  ip_puerto_health_checker:str
+  ip_puerto_broker:str
   puerto_escuchar_programas:str
   context:zmq.Context
   socket_broker:zmq.Socket
@@ -150,6 +149,7 @@ class Facultad:
     peticion["nombreFacultad"] = self.nombre
     return peticion
 
+  # aca esta la peticion del broker ESTO NO SE CAMBIAAA DE ACAAAAAAAAAAAAA
   def enviar_peticion_broker(self, peticion_enviar: dict) -> bool:
     if not hasattr(self, 'socket_broker') or self.socket_broker.closed:
         print(f"{RED}Error: No hay conexión activa con el broker{RESET}")
@@ -177,7 +177,7 @@ class Facultad:
 
   def cerrar_comunicacion(self) -> None:
     self.socket_programas.close()
-    self.socket_servidor.close()
+    self.socket_broker.close()
     self.socket_health_checker.close()
     self.context.term()
 

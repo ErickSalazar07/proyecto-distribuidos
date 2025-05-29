@@ -12,7 +12,7 @@ class HealthChecker:
   context:zmq.Context
   socket_servidor_principal:zmq.Socket
   socket_servidor_auxiliar:zmq.Socket
-  socket_facultades:zmq.Socket
+  socket_broker:zmq.Socket
   servidor_activo:str
 
 # Metodos de la clase
@@ -27,7 +27,7 @@ class HealthChecker:
     self.context = None
     self.socket_servidor_principal = None
     self.socket_servidor_auxiliar = None
-    self.socket_facultades = None
+    self.socket_broker = None
     self.servidor_activo = "principal"
 
   def crear_conexion(self):
@@ -38,19 +38,19 @@ class HealthChecker:
     self.socket_servidor_principal.bind("tcp://*:5550")
 
     # Socket para publicar estado facultades (PUB)
-    self.socket_facultades = self.context.socket(zmq.REP)
-    self.socket_facultades.bind(f"tcp://*:{self.puerto_publicaciones}")
+    self.socket_broker = self.context.socket(zmq.REP)
+    self.socket_broker.bind(f"tcp://*:{self.puerto_publicaciones}")
 
   def comunicar_estado(self):
     while True:
-      pregunta_facultades = self.socket_facultades.recv_json()
+      pregunta_facultades = self.socket_broker.recv_json()
     
       if pregunta_facultades.get("estadoServidor") == True:
         estado = {
           "servidorActivo": self.servidor_activo,
           "ipPuerto": self.ip_puerto_servidor_principal if self.servidor_activo == "principal" else self.ip_puerto_servidor_auxiliar
         }
-        self.socket_facultades.send_json(estado)
+        self.socket_broker.send_json(estado)
         print(f"📢 Publicando estado: {estado}")
       else:
         print(f"Peticion de facultad mal formada")

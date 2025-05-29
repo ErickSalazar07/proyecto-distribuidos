@@ -104,8 +104,9 @@ class Facultad:
 
     # Se crea un canal y se inicializa en el ip y puerto que se ingresan por comando
     self.socket_broker = self.context.socket(zmq.REQ)
+    self.socket_broker.identity = (f"Client-{self.nombre}").encode('ascii')
     self.socket_broker.connect(f"tcp://{self.ip_puerto_broker}")
-    self.iniciar_escucha_health_checker()
+    # self.iniciar_escucha_health_checker()
 
     # Inicia hilo para escuchar actualizaciones
 
@@ -116,7 +117,7 @@ class Facultad:
     peticion:dict = self.socket_programas.recv_json() # Recibe la peticion de algun programa academico
     print(f"{GREEN}Peticion recibida.\n{RESET}")
     print(f"{YELLOW}Peticion: {peticion}{RESET}")
-    self.socket_programas.send_string("y") # Responde al programa academico con (y,n) si o no
+    #self.socket_programas.send_string("y") # Responde al programa academico con (y,n) si o no
     self.guardar_peticion_archivo(peticion)
     peticion["nombreFacultad"] = self.nombre
     return peticion
@@ -144,7 +145,10 @@ class Facultad:
     print("Escuchando peticiones de los programas academicos.")
     while True:
       peticion_programa = self.recibir_peticion()
-      self.enviar_peticion_broker(peticion_programa)
+      if self.enviar_peticion_broker(peticion_programa):
+        self.socket_programas.send_string("Peticion aceptada")
+        continue
+      self.socket_programas.send_string("Peticion denegada")
 
   def cerrar_comunicacion(self) -> None:
     self.socket_programas.close()

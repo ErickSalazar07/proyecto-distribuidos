@@ -14,9 +14,13 @@ mensaje = {
     "numSalones": 1,
     "numLaboratorios": 1
 }
+confirmacion = {
+    "confirmacion":False
+}
 
 # Enviar muchas peticiones seguidas
 for i in range(30):
     print(f"[{i+1}] Enviando petición maliciosa...")
     socket.send_json(mensaje)
+    socket.send_json(confirmacion)
     time.sleep(0.1)  # Espera muy corta (ajusta para que dispare el umbral)

@@ -2,6 +2,7 @@ import zmq
 import sys
 import time
 import threading
+import json
 
 # Colores para visualizar mejor la salida estandar.
 RED = "\033[91m"
@@ -21,23 +22,27 @@ class ServidorCentral:
   solicitudes_fallidas:list
   peticiones:list
   context:zmq.Context
+  context_workers:zmq.Context
   socket_broker:zmq.Socket
   socket_health_checker:zmq.Socket
   ip_puerto_health_checker:str
   hilo_health:threading.Thread
+  url_worker:str
   workers:list
 
   def __init__(self):
 
     self.db = None
-    self.num_salones = 0
-    self.num_laboratorios = 0
+    self.num_salones = 380
+    self.num_laboratorios = 60
     self.solicitudes_fallidas = list()
     self.context = None
+    self.context_workers = None
     self.socket_broker = None
     self.socket_health_checker = None
     self.hilo_health = None
     self.ip_puerto_health_checker = "localhost:5550"
+    self.url_worker = "tcp://localhost:5555"
     self.workers = []
     # self.ip_puerto_health_checker = "10.43.96.80:5550"
     
@@ -48,7 +53,6 @@ class ServidorCentral:
     
 
   def cargar_db(self,nombre_db:str):
-
     try:
       with open(nombre_db,"r") as db:
         for linea in db:
@@ -81,10 +85,7 @@ class ServidorCentral:
 
   def crear_comunicacion(self) -> None:
     self.context = zmq.Context()
-    
-    # Comunicacion con broker
-    self.socket_broker = self.context.socket(zmq.REQ)
-    self.socket_broker.bind("tcp://*:5555")
+    self.context_workers = zmq.Context()
     
     # Comunicacion con health checker
     self.socket_health_checker = self.context.socket(zmq.PUSH)
@@ -96,32 +97,59 @@ class ServidorCentral:
   
   def crear_workers(self):
     for i in range(CANT_WORKERS):
-      hilo = threading.Thread(target=self.laburo, args=i)
-      self.workers.append(hilo)
+        thread = threading.Thread(target=self.laburo,
+                                  args=(self.url_worker, self.context_workers, i, ))
+        thread.start()
+        self.workers.append(thread)
 
-  def laburo(self, ident):
-    # Presentarse con el broker
-    # Esperar trabajo del broker
-    # Realizar el trabajo
-    # Enviar el trabajo resuelto al broker 
-    self.conectarse_con_broker(ident)
-    hola = 1
-    return hola
+  def laburo(self, worker_url, context, i):
+    socket_worker:zmq.Socket = None
+    """ Worker using REQ socket to do LRU routing """
+    socket_worker = context.socket(zmq.REQ)
 
-  def conectarse_con_broker(self,ident):
-    self.socket_broker.identity = u"Worker-{}".format(ident).encode("ascii")
-    self.socket_broker.connect("ipc://backend.ipc")
+    # set worker identity
+    socket_worker.identity = (u"Worker-%d" % (i)).encode('ascii')
+    socket_worker.connect(worker_url)
 
-    # Tell broker we're ready for work
-    self.socket_broker.send(b"READY")
+    # Tell the broker we are ready for work
+    socket_worker.send(b"READY")
+    try:
+      while True:
+        address, empty, request_bytes = socket_worker.recv_multipart()
+        request:dict = json.loads(request_bytes)
+        print("%s: %s\n" % (socket_worker.identity.decode('ascii'),
+                            request), end='')
+        if isinstance(request, dict) and 'nombreFacultad' in request and 'nombrePrograma' in request:
+          print(f"{YELLOW}Petición de {request['nombreFacultad']} - Programa {request['nombrePrograma']}{RESET}")
+        else:
+          print(f"{RED}Petición recibida malformada o incompleta: {request}{RESET}")
+          continue  
+        print(f"{MAGENTA}Contenido: {request}{RESET}")
 
-    while True:
-        address, empty, request = self.socket_broker.recv_multipart()
-        print("{}: {}".format(self.socket_broker.identity.decode("ascii"),
-                              request.decode("ascii")))
-        self.socket_broker.send_multipart([address, b"", b"OK"])
-  
-  
+        reserva_exitosa:bool = self.reservar_peticion(request)
+        respuesta = {
+          "respuesta": "y" if reserva_exitosa else "n",
+          "salonesDisponibles": self.num_salones,
+          "laboratoriosDisponibles": self.num_laboratorios
+        }
+        respuesta_codificada = json.dumps(respuesta).encode('utf-8')
+        socket_worker.send_multipart([address, b'', respuesta_codificada])
+
+        if reserva_exitosa:
+          # Esperar confirmación de aceptación de la facultad
+          _, raw_confirmacion = socket_worker.recv_multipart()
+          confirmacion = zmq.utils.jsonapi.loads(raw_confirmacion)
+          if confirmacion.get("confirmacion") == True:
+            print(f"{GREEN}La facultad confirmó la reserva.{RESET}")
+            self.guardar_peticion_db(request)
+            self.peticiones.append(request)
+          else:
+            print(f"{RED}El broker rechazó la reserva.{RESET}") # Devolvemos recursos asignados
+            self.num_salones += request.get("numSalones",0)
+            self.num_laboratorios += request.get("numLaboratorios",0)
+
+    except Exception as e:
+      print(f"{RED}[Worker id:{i}] Error al trabajar: {e}{RESET}")
 
   def comunicar_estado_health_checker(self):
     while True:
@@ -150,41 +178,6 @@ class ServidorCentral:
     print(f"{RED}Solicitud no atendida guardada en lista de peticiones fallidas.{RESET}")
     return {"estatus": False, "laboratoriosDisponibles": False}
 
-  '''
-  def escuchar_peticiones(self) -> None:
-    print(f"{CYAN}Escuchando peticiones de las broker en el puerto: 5555...{RESET}")
-    
-    while True:
-      raw_msg = self.socket_broker.recv()
-      peticion = zmq.utils.jsonapi.loads(raw_msg)
-      if isinstance(peticion, dict) and 'nombreFacultad' in peticion and 'nombrePrograma' in peticion:
-        print(f"{YELLOW}Petición de {peticion['nombreFacultad']} - Programa {peticion['nombrePrograma']}{RESET}")
-      else:
-        print(f"{RED}Petición recibida malformada o incompleta: {peticion}{RESET}")
-        continue  
-      print(f"{MAGENTA}Contenido: {peticion}{RESET}")
-
-      reserva_exitosa:bool = self.reservar_peticion(peticion)
-      respuesta = {
-        "respuesta": "y" if reserva_exitosa else "n",
-        "salonesDisponibles": self.num_salones,
-        "laboratoriosDisponibles": self.num_laboratorios
-      }
-
-      self.socket_broker.send_json(respuesta)
-
-      if reserva_exitosa:
-        # Esperar confirmación de aceptación de la facultad
-        _, raw_confirmacion = self.socket_broker.recv_multipart()
-        confirmacion = zmq.utils.jsonapi.loads(raw_confirmacion)
-        if confirmacion.get("confirmacion") == True:
-          print(f"{GREEN}La facultad confirmó la reserva.{RESET}")
-          self.guardar_peticion_db(peticion)
-        else:
-          print(f"{RED}El broker rechazó la reserva.{RESET}") # Devolvemos recursos asignados
-          self.num_salones += peticion.get("numSalones",0)
-          self.num_laboratorios += peticion.get("numLaboratorios",0)
-      '''
   def cerrar_comunicacion(self) -> None:
     self.socket_broker.close()
     self.socket_health_checker.close()
@@ -209,7 +202,9 @@ if __name__ == "__main__":
   servidor_central = ServidorCentral()
   servidor_central.crear_comunicacion()
   try:
-    servidor_central.escuchar_peticiones()
+    servidor_central.crear_workers()
+    for worker in servidor_central.workers:
+      worker.join()
   except KeyboardInterrupt:
     print(f"\n{RED}Servidor detenido manualmente.{RESET}")
     print(f"{YELLOW}Solicitudes fallidas almacenadas:{RESET}")

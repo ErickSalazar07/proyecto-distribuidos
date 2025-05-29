@@ -49,8 +49,8 @@ class ProgramaAcademico:
     print("Enviando informacion del programa en formato JSON...")
     self.socket_facultad.send_json(self.transformar_info_diccionario())
     print("Informacion enviada.")
-    respuesta:str = self.socket_facultad.recv_string();
-    print("Respuesta: %s\n"%respuesta)
+    respuesta:str = self.socket_facultad.recv_string()
+    print("Respuesta Servidor: %s\n"%respuesta)
 
   def cerrar_conexion(self) -> None:
     self.socket_facultad.close()

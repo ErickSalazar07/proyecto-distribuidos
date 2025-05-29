@@ -42,7 +42,6 @@ class ServidorCentral:
     print("Informacion del servidor.\n\n")
     print(self)
     self.db = open("db.txt","+w")
-    
 
   def cargar_db(self,nombre_db:str):
 

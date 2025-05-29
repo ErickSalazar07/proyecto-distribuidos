@@ -3,6 +3,7 @@
 import sys
 import threading
 import zmq
+import time
 
 # Colores para output en consola
 RED = "\033[91m"
@@ -13,7 +14,11 @@ RESET = "\033[0m"
 
 
 class Broker:
+    available_workers:int
+    workers_list:list
+
     def __init__(self):
+        print("init")
         # Dirección (IP:PUERTO) del Health Checker
         self.ip_puerto_health_checker = "localhost:5553"
         # Puerto en el que el broker recibirá peticiones de las Facultades
@@ -29,6 +34,9 @@ class Broker:
         # Para guardar la dirección (IP:PUERTO) del servidor actualmente activo
         self.current_backend_ip = None
 
+        self.available_workers = 0
+        self.workers_list = []
+
 
     def crear_comunicacion(self) -> None:
         """Inicializa el contexto, el ROUTER (frontend), el SUB (health)
@@ -43,14 +51,13 @@ class Broker:
 
         # 2) BACKEND: DEALER para reenviar a los Servidores (inicialmente no conectado)
         #    Esperaremos a que llegue el primer estado del Health Checker para conectar.
-        self.backend = self.context.socket(zmq.DEALER)
+        self.backend = self.context.socket(zmq.ROUTER)
         # (No hacemos bind ni connect aquí; se hará en actualizar_servidor_activo())
 
         # 3) HEALTH_CHECKER: SUB para recibir actualizaciones de qué servidor está activo
-        self.socket_health_checker = self.context.socket(zmq.SUB)
+        self.socket_health_checker = self.context.socket(zmq.REQ)
         self.socket_health_checker.connect(f"tcp://{self.ip_puerto_health_checker}")
-        self.socket_health_checker.setsockopt_string(zmq.SUBSCRIBE, "")
-        print(f"{GREEN}Broker: SUB conectado a Health Checker en tcp://{self.ip_puerto_health_checker}{RESET}")
+        print(f"{GREEN}Broker: REQ conectado a Health Checker en tcp://{self.ip_puerto_health_checker}{RESET}")
 
         # 4) Arrancamos hilo para procesar mensajes del Health Checker
         thread = threading.Thread(target=self._escuchar_health_checker, daemon=True)
@@ -62,11 +69,13 @@ class Broker:
            mensajes JSON del Health Checker y llama a actualizar_servidor_activo()."""
         while True:
             try:
+                self.socket_health_checker.send_json({"estadoServidor":True})
                 estado = self.socket_health_checker.recv_json()
                 # Ejemplo de estado recibido:
                 #   { "servidorActivo": "principal", "ipPuerto": "localhost:5560" }
                 print(f"{CYAN}Broker: mensaje Health Checker → {estado}{RESET}")
                 self.actualizar_servidor_activo(estado)
+                time.sleep(1) # Esperar 1 segundos
             except zmq.ZMQError as e:
                 print(f"{RED}Broker: ZMQError al leer Health Checker: {e}{RESET}")
                 break
@@ -96,45 +105,176 @@ class Broker:
                 pass
 
             # Creamos un socket NUEVO cada vez que cambia el servidor
-            self.backend = self.context.socket(zmq.DEALER)
+            self.backend = self.context.socket(zmq.ROUTER)
 
         # Conectamos el nuevo DEALER al servidor activo
-        self.backend.connect(f"tcp://{ip_puerto}")
+        self.backend.bind(f"tcp://*:{ip_puerto.split(':')[-1]}")
         self.current_backend_ip = ip_puerto
         print(f"{YELLOW}Broker: conectado (backend DEALER) a → tcp://{ip_puerto}{RESET}")
 
-
     def start(self) -> None:
-        """
-        Una vez que el Health Checker haya enviado al menos un estado,
-        podemos arrancar el proxy que interconecta frontend (ROUTER) y backend (DEALER).
-        """
-        # Si todavía no tenemos backend conectado, esperamos un poco
-        if self.current_backend_ip is None:
-            print(f"{YELLOW}Broker: esperando que Health Checker indique el servidor activo...{RESET}")
-            # Un breve sleep para dar tiempo a que Health Checker publique
-            # (en un sistema real, quizá usarías synchronización o poller en ambos sockets)
-            import time; time.sleep(1)
+        poller = zmq.Poller()
+        poller.register(self.backend, zmq.POLLIN)
+        poller.register(self.frontend, zmq.POLLIN)
 
-        print(f"{GREEN}Broker: iniciando proxy ROUTER ⇄ DEALER{RESET}")
         try:
-            zmq.proxy(self.frontend, self.backend)
-        except zmq.ContextTerminated:
-            # El contexto fue cerrado externamente
-            pass
+            if self.current_backend_ip is None:
+                print(f"{YELLOW}Broker: esperando que Health Checker indique el servidor activo...{RESET}")
+                time.sleep(1)
+
+            while True:
+                socks = dict(poller.poll())
+
+                # Manejar mensajes del backend (workers)
+                if self.backend in socks and socks[self.backend] == zmq.POLLIN:
+                    message = self.backend.recv_multipart()
+                    worker_id = message[0]
+
+                    # Caso: worker se registra con READY
+                    if len(message) == 3 and message[2] == b'READY':
+                        self.available_workers += 1
+                        self.workers_list.append(worker_id)
+                        print(f"{GREEN}Worker {worker_id} registrado como disponible{RESET}")
+                        continue
+
+                    # Caso: respuesta del worker a un cliente
+                    if len(message) >= 5:
+                        client_id = message[2]
+                        reply = message[4]
+                        self.frontend.send_multipart([client_id, b"", reply])
+                        print(f"{GREEN}Respuesta enviada al cliente {client_id}{RESET}")
+
+                # Manejar mensajes del frontend (facultades/clients)
+                if self.frontend in socks and socks[self.frontend] == zmq.POLLIN:
+                    if self.available_workers > 0:
+                        client_msg = self.frontend.recv_multipart()
+                        client_id = client_msg[0]
+                        request = client_msg[2]
+                        print(f"{CYAN}Petición recibida de cliente {client_id}{RESET}")
+
+                        # Obtener un worker disponible
+                        worker_id = self.workers_list.pop(0)
+                        self.available_workers -= 1
+
+                        # Enviar trabajo al worker: [worker_id][empty][client_id][empty][request]
+                        self.backend.send_multipart([worker_id, b"", client_id, b"", request])
+                        print(f"{YELLOW}Petición enviada al worker {worker_id}{RESET}")
+                    else:
+                        print(f"{RED}No hay workers disponibles actualmente. Cliente en espera.{RESET}")
+
         except Exception as e:
-            print(f"{RED}Broker: Proxy interrumpido: {e}{RESET}")
+            print(f"{RED}Error en el broker: {e}{RESET}")
         finally:
             self.frontend.close()
             self.backend.close()
             self.context.term()
 
+'''
+    def start(self) -> None:
+        # init poller
+        poller = zmq.Poller()
 
+        # Always poll for worker activity on backend
+        poller.register(self.backend, zmq.POLLIN)
+
+        # Poll front-end only if we have available workers
+        poller.register(self.frontend, zmq.POLLIN)
+
+        try:
+            # Si todavía no tenemos backend conectado, esperamos un poco
+            if self.current_backend_ip is None:
+                print(f"{YELLOW}Broker: esperando que Health Checker indique el servidor activo...{RESET}")
+                # Un breve sleep para dar tiempo a que Health Checker publique
+                time.sleep(1)
+            while True:
+                socks = dict(poller.poll())
+                # Si mensaje viene de backend
+                if self.backend in socks:
+                    message = self.backend.recv_multipart()
+                    worker_id = message[0]
+
+                    if len(message) == 3 and message[2] == b"READY":
+                        self.available_workers += 1
+                        self.workers_list.append(worker_id)
+                        print(f"{GREEN}Worker {worker_id} listo{RESET}")
+                        continue
+
+                    # Procesar respuesta de worker a cliente
+                    client_id = message[2]
+                    reply = message[4]
+                    self.frontend.send_multipart([client_id, b"", reply])
+
+                # Si mensaje viene del cliente y hay workers disponibles
+                if self.frontend in socks and self.available_workers > 0:
+                    client_msg = self.frontend.recv_multipart()
+                    client_id = client_msg[0]
+                    request = client_msg[2]
+
+                    worker_id = self.workers_list.pop(0)
+                    self.available_workers -= 1
+
+                    self.backend.send_multipart([worker_id, b"", client_id, b"", request])
+
+                
+                socks = dict(poller.poll())
+                # Handle worker activity on backend
+                if (self.backend in socks and socks[self.backend] == zmq.POLLIN):
+                    # Queue worker address for LRU routing
+                    message = self.backend.recv_multipart()
+                    worker_addr = message[0]
+
+                    # add worker back to the list of workers
+                    self.available_workers += 1
+                    self.workers_list.append(worker_addr)
+                    print(f"{GREEN}Worker {worker_addr} agregado{RESET}")
+
+                    #   Second frame is empty
+                    empty = message[1]
+                    assert empty == b""
+
+                    # Third frame is READY or else a client reply address
+                    client_addr = message[2]
+
+                    # If client reply, send rest back to frontend
+                    if client_addr != b'READY':
+                        # Following frame is empty
+                        empty = message[3]
+                        assert empty == b""
+
+                        reply = message[4]
+                        self.frontend.send_multipart([client_addr, b"", reply])
+                        client_nbr -= 1
+
+                # poll on frontend only if workers are available
+                if self.available_workers > 0:
+                    if (self.frontend in socks and socks[self.frontend] == zmq.POLLIN):
+                        # Now get next client request, route to LRU worker
+                        # Client request is [address][empty][request]
+                        [client_addr, empty, request] = self.frontend.recv_multipart()
+                        print(f"{GREEN}Cliente {client_addr} leido {RESET}")
+                        assert empty == b""
+
+                        #  Dequeue and drop the next worker address
+                        self.available_workers += -1
+                        worker_id = self.workers_list.pop()
+
+                        self.backend.send_multipart([worker_id, b"",
+                                                client_addr, b"", request])
+                                                
+        except Exception as e:
+            print(f"{RED}Error en el proxy: {e}{RESET}")
+        finally:
+            self.frontend.close()
+            self.backend.close()
+            self.context.term()
+'''
 def main():
+    print("Broker")
     broker = Broker()
+    print("Crear comunicacion")
     broker.crear_comunicacion()
+    print("Start")
     broker.start()
-
 
 if __name__ == "__main__":
     main()

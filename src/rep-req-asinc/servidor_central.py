@@ -17,6 +17,7 @@ class ServidorCentral:
   num_salones:int
   num_laboratorios:int
   solicitudes_fallidas:list
+  peticiones:list
   context:zmq.Context
   socket_facultades:zmq.Socket
   socket_health_checker:zmq.Socket
@@ -51,6 +52,20 @@ class ServidorCentral:
             self.num_salones = int(linea.split(":")[1].strip())
           elif linea.startswith("Laboratorios:"):
             self.num_laboratorios = int(linea.split(":")[1].strip())
+          else:
+            if linea.strip():
+              try:
+                partes = [p.strip() for p in linea.split(",")]
+                peticion = {
+                  "nombreFacultad": partes[0].split(":")[1].strip(),
+                  "nombrePrograma": partes[1].split(":")[1].strip(),
+                  "numSalones": int(partes[2].split(":")[1].strip()),
+                  "numLaboratorios": int(partes[3].split(":")[1].strip())
+                }
+                self.peticiones.append(peticion)
+              except Exception as e:
+                print(f"{YELLOW}Advertencia: No se puedo leer un registro: {e}{RESET}")
+
         db.close()
     except Exception as e:
       print(f"{RED}Hubo un error leyendo el archivo: Error: {e}{RESET}")
@@ -149,6 +164,11 @@ class ServidorCentral:
     self.db.write(peticion_txt)
 
   def cerrar_db(self):
+    for peticion in self.peticiones:
+      peticion_txt = f"Nombre Facultad: {peticion['nombreFacultad']}, Nombre Programa: {peticion['nombrePrograma']},"\
+      + f"Num Salones: {peticion['numSalones']}, Num Laboratorios: {peticion['numLaboratorios']}\n"
+      self.db.write(peticion_txt)
+
     self.db.write(f"Salones: {self.num_salones}\n")
     self.db.write(f"Laboratorios: {self.num_laboratorios}\n")
     self.db.close()

@@ -214,6 +214,9 @@ def iniciarServidor():
     servidor_central.cerrar_comunicacion()
     servidor_central.cerrar_db()
 
+def traer_archivo_central():
+  i = 1
+
 
 def main():
     # REQ socket hacia el Health Checker
@@ -252,6 +255,7 @@ def main():
 
         # Esperamos antes de volver a preguntar
         time.sleep(1)
+      
 
 if __name__ == "__main__":
     main()

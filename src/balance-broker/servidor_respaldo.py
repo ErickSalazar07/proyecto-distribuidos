@@ -25,9 +25,6 @@ class ServidorCentral:
   context:zmq.Context
   context_workers:zmq.Context
   socket_broker:zmq.Socket
-  socket_health_checker:zmq.Socket
-  ip_puerto_health_checker:str
-  hilo_health:threading.Thread
   url_worker:str
   workers:list
 
@@ -40,10 +37,7 @@ class ServidorCentral:
     self.context = None
     self.context_workers = None
     self.socket_broker = None
-    self.socket_health_checker = None
-    self.hilo_health = None
-    self.ip_puerto_health_checker = "localhost:5550"
-    self.url_worker = "tcp://localhost:5555"
+    self.url_worker = "tcp://localhost:5572"
     self.workers = []
     # self.ip_puerto_health_checker = "10.43.96.80:5550"
     
@@ -87,14 +81,7 @@ class ServidorCentral:
   def crear_comunicacion(self) -> None:
     self.context = zmq.Context()
     self.context_workers = zmq.Context()
-    
-    # Comunicacion con health checker
-    self.socket_health_checker = self.context.socket(zmq.PUSH)
-    self.socket_health_checker.connect(f"tcp://{self.ip_puerto_health_checker}")
 
-    # Crear hilo para comunicacion con health checker
-    self.hilo_health = threading.Thread(target=self.comunicar_estado_health_checker, daemon=True)
-    self.hilo_health.start()
   
   def crear_workers(self):
     for i in range(CANT_WORKERS):
@@ -152,17 +139,6 @@ class ServidorCentral:
     except Exception as e:
       print(f"{RED}[Worker id:{i}] Error al trabajar: {e}{RESET}")
 
-  def comunicar_estado_health_checker(self):
-    while True:
-      mensaje = {"estado": "ok"}
-
-      try:
-        self.socket_health_checker.send_json(mensaje)
-        print(f"{BLUE}[Health Check] Estado enviado al health_checker.{RESET}")
-      except Exception as e:
-        print(f"{RED}[Health Check] Error al enviar estado: {e}{RESET}")
-      time.sleep(2) # Espera 2 segundo a enviar el siguiente ping o estado
-
   def reservar_peticion(self,peticion:dict) -> dict:
     num_salones = peticion.get("numSalones",0)
     num_laboratorios = peticion.get("numLaboratorios",0)
@@ -181,7 +157,6 @@ class ServidorCentral:
 
   def cerrar_comunicacion(self) -> None:
     self.socket_broker.close()
-    self.socket_health_checker.close()
     self.context.term()
 
   def guardar_peticion_db(self,peticion):

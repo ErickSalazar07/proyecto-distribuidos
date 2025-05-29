@@ -227,7 +227,7 @@ def main():
     ctx_hc = zmq.Context()
     sub = ctx.socket(zmq.SUB)
     sub.connect(HEALTH_ADDR)
-    sub.setsockopt_string(zmq.SUBSCRIBE, "Estado")  # recibe todo
+    sub.setsockopt_string(zmq.SUBSCRIBE, "estado")  # recibe todo
 
 
     server_thread = None

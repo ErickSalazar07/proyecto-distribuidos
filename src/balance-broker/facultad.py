@@ -22,6 +22,7 @@ class Facultad:
   context:zmq.Context
   socket_broker:zmq.Socket
   socket_programas:zmq.Socket
+  
 
 # Metodos de la clase
 
@@ -40,6 +41,7 @@ class Facultad:
     self.context = None
     self.socket_broker = None
     self.socket_programas = None
+    
 
     for i in range(1,len(sys.argv)):
       if sys.argv[i] == "-n":
@@ -47,7 +49,7 @@ class Facultad:
       elif sys.argv[i] == "-s":
         self.semestre = datetime.strptime(sys.argv[i+1],"%m-%Y").date()
       elif sys.argv[i] == "-ip-p-s":
-        self.ip_puerto_broker = sys.argv[i+1]
+        self.ip_puerto_broker:str = sys.argv[i+1]
       elif sys.argv[i] == "-puerto-escuchar":
         self.puerto_escuchar_programas = sys.argv[i+1]
 
@@ -76,7 +78,7 @@ class Facultad:
     print(f"Debe ingresar las banderas/opciones y sus argumentos correspondientes.\n")
     print(f"-n \"nombre_facultad\": Es el nombre de la facultad")
     print(f"-s \"mm-yyyy\": Es el semestre, el cual debe seguir el formato propuesto")
-    print(f"-ip-p-s \"ip_broker:puerto_broker\": Es la ip y el puerto del broker separados por ':'")
+    print(f"-ip-p-s \"ip_broker:puerto_broker\": Es la ip y el puerto del servidor separados por ':'")
     print(f"-puerto-escuchar \"puerto_escuchar_programas\": Es el puerto por el cual la facultad va a escuchar las peticiones de los programas")
 
   def campos_validos(self) -> bool:
@@ -87,7 +89,7 @@ class Facultad:
     return\
       f"Nombre: {self.nombre}\n"\
     + f"Semestre: {self.semestre}\n"\
-    + f"Ip broker: Puerto broker => {self.ip_puerto_broker}\n"\
+    + f"Ip servidor: Puerto servidor => {self.ip_puerto_broker}\n"\
     + f"Puerto escuchar peticions programas: {self.puerto_escuchar_programas}\n\n"
 
   def crear_comunicacion(self) -> None:
@@ -98,12 +100,19 @@ class Facultad:
     self.socket_programas = self.context.socket(zmq.REP) # Socket sincrono. 
     self.socket_programas.bind(f"tcp://*:{self.puerto_escuchar_programas}")
     
+    # Se inicializa el canal para comunicarse con el health_checker
+    self.socket_health_checker = self.context.socket(zmq.SUB)
+    self.socket_health_checker.connect(f"tcp://{self.ip_puerto_health_checker}")
+    self.socket_health_checker.setsockopt_string(zmq.SUBSCRIBE,"")
 
     # Se crea un canal y se inicializa en el ip y puerto que se ingresan por comando
     self.socket_broker = self.context.socket(zmq.REQ)
     self.socket_broker.connect(f"tcp://{self.ip_puerto_broker}")
+    self.iniciar_escucha_health_checker()
 
     # Inicia hilo para escuchar actualizaciones
+
+  
 
   def recibir_peticion(self) -> dict:
     print(f"{CYAN}Recibiendo peticion en el puerto: {self.puerto_escuchar_programas}...{RESET}")
@@ -115,7 +124,6 @@ class Facultad:
     peticion["nombreFacultad"] = self.nombre
     return peticion
 
-  # aca esta la peticion del broker ESTO NO SE CAMBIAAA DE ACAAAAAAAAAAAAA
   def enviar_peticion_broker(self, peticion_enviar: dict) -> bool:
     if not hasattr(self, 'socket_broker') or self.socket_broker.closed:
         print(f"{RED}Error: No hay conexión activa con el broker{RESET}")
@@ -144,6 +152,7 @@ class Facultad:
   def cerrar_comunicacion(self) -> None:
     self.socket_programas.close()
     self.socket_broker.close()
+    self.socket_health_checker.close()
     self.context.term()
 
 # Seccion main del programa

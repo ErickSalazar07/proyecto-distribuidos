@@ -1,99 +1,96 @@
 import zmq
-import threading
 import time
+import threading
 
 class HealthChecker:
-    """
-    Este componente:
-      - Recibe pings de los servidores en PULL(5550)
-      - Atiende consultas de las facultades en REP(5553)
-      - Mantiene self.servidor_activo = "principal"|"auxiliar"
-    """
-    def __init__(self, contexto):
-        self.ctx = contexto
 
-        # Dirección de pings entrantes desde servidores
-        self.puerto_ping = 5550
-        # Puerto donde facultades preguntan estado
-        self.puerto_estado = 5553
+# Atributos de la clase
+  ip_puerto_servidor_principal:str
+  ip_puerto_servidor_auxiliar:str
+  puerto_escuchar_facultades:str
+  puerto_publicaciones:str
+  context:zmq.Context
+  socket_servidor_principal:zmq.Socket
+  socket_servidor_auxiliar:zmq.Socket
+  socket_facultades:zmq.Socket
+  servidor_activo:str
 
-        # Socket que recibe pings de servidores
-        self.sock_ping = self.ctx.socket(zmq.PULL)
-        self.sock_ping.bind(f"tcp://*:{self.puerto_ping}")
+# Metodos de la clase
 
-        # Socket que responde a consultas de facultades
-        self.sock_estado = self.ctx.socket(zmq.REP)
-        self.sock_estado.bind(f"tcp://*:{self.puerto_estado}")
+  def __init__(self):
+    #self.ip_puerto_servidor_principal = "10.43.96.68:5555"
+    #self.ip_puerto_servidor_auxiliar = "10.43.96.80:5555"
+    self.ip_puerto_servidor_principal = "localhost:5555"
+    self.ip_puerto_servidor_auxiliar = "localhost:5555"
+    self.puerto_escuchar_facultades = "5552"
+    self.puerto_publicaciones = "5553"
+    self.context = None
+    self.socket_servidor_principal = None
+    self.socket_servidor_auxiliar = None
+    self.socket_facultades = None
+    self.servidor_activo = "principal"
 
-        # Estado inicial
-        self.servidor_activo = "principal"
+  def crear_conexion(self):
+    self.context = zmq.Context()
+    
+    # Scoket para recibir ping del servidor (PULL)
+    self.socket_servidor_principal = self.context.socket(zmq.PULL)
+    self.socket_servidor_principal.bind("tcp://*:5550")
 
-    def _gestionar_estado(self):
-        """ Hilo que atiende preguntas de facultades. """
-        while True:
-            msg = self.sock_estado.recv_json()
-            if msg.get("estadoServidor") is True:
-                respuesta = {
-                    "servidorActivo": self.servidor_activo,
-                    # Aquí asumes mismo puerto para ambos; podrías variar según tu infra
-                    "ipPuerto": "localhost:5555"  
-                }
-                self.sock_estado.send_json(respuesta)
-            else:
-                # Mensaje mal formado
-                self.sock_estado.send_json({"error": "formato inválido"})
+    # Socket para publicar estado facultades (PUB)
+    self.socket_facultades = self.context.socket(zmq.REP)
+    self.socket_facultades.bind(f"tcp://*:{self.puerto_publicaciones}")
 
-    def _escanear_pings(self):
-        """ Hilo que actualiza self.servidor_activo según llegada de pings. """
-        poll = zmq.Poller()
-        poll.register(self.sock_ping, zmq.POLLIN)
+  def comunicar_estado(self):
+    while True:
+      pregunta_facultades = self.socket_facultades.recv_json()
+    
+      if pregunta_facultades.get("estadoServidor") == True:
+        estado = {
+          "servidorActivo": self.servidor_activo,
+          "ipPuerto": self.ip_puerto_servidor_principal if self.servidor_activo == "principal" else self.ip_puerto_servidor_auxiliar
+        }
+        self.socket_facultades.send_json(estado)
+        print(f"📢 Publicando estado: {estado}")
+      else:
+        print(f"Peticion de facultad mal formada")
 
-        while True:
-            eventos = dict(poll.poll(timeout=2000))  # 2s
-            if self.sock_ping in eventos:
-                datos = self.sock_ping.recv_json()
-                # Se espera {'estado': 'ok'} o similar
-                if datos.get("estado") == "ok":
-                    self.servidor_activo = "principal"
-                else:
-                    self.servidor_activo = "auxiliar"
-            else:
-                # No llegó ping en 2s → considerar caída principal
-                self.servidor_activo = "auxiliar"
+  def escuchar_ping_servidor_central(self):
+    print("🩺 Health checker escuchando pings del servidor central o auxiliar...\n")
+    poller = zmq.Poller()
+    poller.register(self.socket_servidor_principal,zmq.POLLIN)
 
-    def arrancar(self):
-        """ Lanza hilos de ping y consultas. """
-        threading.Thread(target=self._gestionar_estado, daemon=True).start()
-        threading.Thread(target=self._escanear_pings, daemon=True).start()
-        print(f"🩺 HealthChecker iniciado (ping en {self.puerto_ping}, estado en {self.puerto_estado})")
+    threading.Thread(target=self.comunicar_estado,daemon=True).start()
 
+    while True:
+      # Espera hasta 2 segundos por el ping o respuesta del servidor
+      socks = dict(poller.poll(timeout=2000)) # 2000 ms = 2 segundos
 
-def main():
-    ctx = zmq.Context()
+      if self.socket_servidor_principal in socks:
+        mensaje = self.socket_servidor_principal.recv_json()
+        print(f"✅ Ping recibido: {mensaje}")
 
-    # --- Inicializar y arrancar HealthChecker ---
-    hc = HealthChecker(ctx)
-    hc.arrancar()
+        if mensaje.get("estado") == "ok":
+          self.servidor_activo = "principal"
+        else:
+          self.servidor_activo = "auxiliar"
+        print(f"🔁 Servidor activo: {self.servidor_activo}\n")
+      else:
+        print("❌ No se recibió ping en 2 segundos. Cambiando de servidor...")
+        self.servidor_activo = "auxiliar"
+        print(f"⚠️ Nuevo servidor activo: {self.servidor_activo}\n")
 
-    # --- Sockets del broker (proxy) ---
-    frontend = ctx.socket(zmq.ROUTER)
-    frontend.bind("tcp://*:6000")    # Peticiones de facultades
+# Pseudo codigo:
+# 1. Prender el health
+# 2. Quedarse escuchando a la facultades, en un hilo
+# 3. Ir verificando que servidor esta activo
+# 4. tener una variable donde 0 sea servidor central y 1 servidor aux
+# 5. mantener este proceso hasta que que los dos servidores se apaguen o no respondan
 
-    backend = ctx.socket(zmq.ROUTER)
-    backend.bind("tcp://*:7000")     # Conexión de workers
-
-    print("🔄 Broker escuchando:")
-    print("    - Clientes en tcp://*:6000")
-    print("    - Workers en tcp://*:7000")
-    print("    - HealthChecker en puertos 5550/5553")
-    # Ejecuta el proxy que enruta todo entre frontend ↔ backend
-    zmq.proxy(frontend, backend)
-
-    # (Nunca llega aquí salvo interrupción)
-    frontend.close()
-    backend.close()
-    ctx.term()
-
+if __name__ == "__main__":
+  health_checker = HealthChecker()
+  health_checker.crear_conexion()
+  health_checker.escuchar_ping_servidor_central()
 
 if __name__ == "__main__":
     main()

@@ -5,13 +5,20 @@ import sys
 class ProgramaAcademico:
 
 # Atributos de la clase
+  # Atributos del usuario
+  usuario:str
+  contrasena:str
+
   nombre:str
   semestre:date
   num_salones:int
   num_laboratorios:int
   ip_puerto_facultad:str
+  ip_puerto_facultad_autenticacion:str # IP puerto para autenticar al usuario
   context:zmq.Context # Crea sockets para el proceso actual.
+  context_autenticacion:zmq.Context # Sockets para la autenticacion
   socket_facultad:zmq.Socket # Socket para comunicarse con las facultades.
+  socket_facultad_autenticacion:zmq.Socket # Socket para comunicarse con la autenticacion de las facultades.
 
 # Metodos de la clase
 
@@ -21,10 +28,12 @@ class ProgramaAcademico:
     self.num_salones = 0
     self.num_laboratorios = 0
     self.ip_puerto_facultad = ""
+    self.ip_puerto_facultad_autenticacion = ""
     self.context = None
+    self.context_autenticacion = None
     self.socket_facultad = None
 
-    if len(sys.argv) != 11:
+    if len(sys.argv) != 13:
       print("Error: Ingreso un numero invalido de argumentos. Verifique.\n")
       self.error_args()
       sys.exit(-3)
@@ -40,6 +49,8 @@ class ProgramaAcademico:
         self.num_laboratorios = int(sys.argv[i+1])
       elif sys.argv[i] == "-ip-p-f":
         self.ip_puerto_facultad = sys.argv[i+1]
+      elif sys.argv[i] == "-ip-p-f-a":
+        self.ip_puerto_facultad_autenticacion = sys.argv[i+1]
 
     if not self.campos_validos():
       print(self)
@@ -50,9 +61,21 @@ class ProgramaAcademico:
     print("Informacion del programa academico.\n\n")
     print(self)
 
+  def autenticar_usuario(self):
+    while(True):
+      print("Ingrese sus datos para entrar al aplicativo")
+      self.usuario = input("Usuario: ")
+      self.contrasena = input("Contrasena: ")
+      self.crear_conexion_autenticacion()
+      es_usuario_valido = self.enviar_autenticacion_del_usuario_a_facultad()
+      self.cerrar_conexion_autenticacion()
+      if es_usuario_valido:
+        break
+      print("Usuario o contraseña incorrectos, intentelo de nuevo o contacte con su facultad")
+
   def campos_validos(self) -> bool:
     return self.nombre != "" and self.semestre is not None and 7 <= self.num_salones <= 10\
-    and 2 <= self.num_laboratorios <= 4 and self.ip_puerto_facultad != ""
+    and 2 <= self.num_laboratorios <= 4 and self.ip_puerto_facultad != "" and self.ip_puerto_facultad_autenticacion	!= ""
 
   def error_args(self):
     print(f"Recuerde ingresar todos los argumentos incluidas las banderas:\n\n")
@@ -61,6 +84,7 @@ class ProgramaAcademico:
     print(f"-num-s \"numero_salones\": Es el numero de salones(entre 7 y 10)")
     print(f"-num-l \"numero_laboratorios\": Es el numero de laboratorios(entre 2 y 4)")
     print(f"-ip-p-f \"ip_facultad:puerto_facultad\": Es la ip y el puerto de la facultad")
+    print(f"-ip-p-f-a \"ip_facultad:puerto_de_autenticacion\": Es la ip y el puerto designado por la facultad para autenticar")
 
   def __str__(self) -> str:
     return\
@@ -68,12 +92,18 @@ class ProgramaAcademico:
       f"Semestre: {self.semestre}\n"\
       f"Numero Salones: {self.num_salones}\n"\
       f"Numero Laboratorios: {self.num_laboratorios}\n"\
-      f"Ip y Puerto de Facultad: {self.ip_puerto_facultad}\n\n"\
+      f"Ip y Puerto de Facultad: {self.ip_puerto_facultad}\n"\
+      f"Ip y Puerto de la conexion de autenticacion de la facultad: {self.ip_puerto_facultad_autenticacion}\n\n"\
 
   def crear_conexion(self) -> None:
     self.context = zmq.Context()
     self.socket_facultad = self.context.socket(zmq.REQ)
     self.socket_facultad.connect(f"tcp://{self.ip_puerto_facultad}") # tcp://direccion_facultad:5555
+
+  def crear_conexion_autenticacion(self) -> None:
+    self.context_autenticacion = zmq.Context()
+    self.socket_facultad_autenticacion = self.context_autenticacion.socket(zmq.REQ)
+    self.socket_facultad_autenticacion.connect(f"tcp://{self.ip_puerto_facultad_autenticacion}") # tcp://direccion_facultad:5566
 
   def enviar_info_programa_a_facultad(self) -> None:
     print("Enviando informacion del programa en formato JSON...")
@@ -82,10 +112,21 @@ class ProgramaAcademico:
     respuesta:str = self.socket_facultad.recv_string();
     print("Respuesta: %s\n"%respuesta)
 
+  def enviar_autenticacion_del_usuario_a_facultad(self) -> bool:
+    self.socket_facultad_autenticacion.send_json(self.transformar_autenticacion_en_diccionario())
+    respuesta:str = self.socket_facultad_autenticacion.recv_string() # La facultad responde si el usuario existe o no
+    if respuesta == "y":
+      return True
+    return False
+
   def cerrar_conexion(self) -> None:
     self.socket_facultad.close()
     self.context.term()
     print("Comunicacion cerrada.")
+
+  def cerrar_conexion_autenticacion(self) -> None:
+    self.socket_facultad_autenticacion.close()
+    self.context_autenticacion.term()
 
   def transformar_info_diccionario(self) -> dict:
     return {
@@ -94,11 +135,18 @@ class ProgramaAcademico:
       "numSalones":self.num_salones,
       "numLaboratorios":self.num_laboratorios
     }
+  
+  def transformar_autenticacion_en_diccionario(self) -> dict:
+    return {
+      "usuario":self.usuario,
+      "contrasena":self.contrasena
+    }
 
 # Seccion main del programa
 
 if __name__ == "__main__":
   programa_academico:ProgramaAcademico = ProgramaAcademico()
+  programa_academico.autenticar_usuario() # Se autentica al usuario
   programa_academico.crear_conexion()
   programa_academico.enviar_info_programa_a_facultad()
   programa_academico.cerrar_conexion()

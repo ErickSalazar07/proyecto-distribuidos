@@ -12,6 +12,8 @@ MAGENTA = "\033[95m"
 CYAN = "\033[96m"
 RESET = "\033[0m"
 
+CANT_WORKERS = 10
+
 class ServidorCentral:
 
   num_salones:int
@@ -23,6 +25,7 @@ class ServidorCentral:
   socket_health_checker:zmq.Socket
   ip_puerto_health_checker:str
   hilo_health:threading.Thread
+  workers:list
 
   def __init__(self):
 
@@ -35,6 +38,7 @@ class ServidorCentral:
     self.socket_health_checker = None
     self.hilo_health = None
     self.ip_puerto_health_checker = "localhost:5550"
+    self.workers = []
     # self.ip_puerto_health_checker = "10.43.96.80:5550"
     
     self.cargar_db("db.txt")
@@ -89,7 +93,35 @@ class ServidorCentral:
     # Crear hilo para comunicacion con health checker
     self.hilo_health = threading.Thread(target=self.comunicar_estado_health_checker, daemon=True)
     self.hilo_health.start()
+  
+  def crear_workers(self):
+    for i in range(CANT_WORKERS):
+      hilo = threading.Thread(target=self.laburo, args=i)
+      self.workers.append(hilo)
 
+  def laburo(self, ident):
+    # Presentarse con el broker
+    # Esperar trabajo del broker
+    # Realizar el trabajo
+    # Enviar el trabajo resuelto al broker 
+    self.conectarse_con_broker(ident)
+    hola = 1
+    return hola
+
+  def conectarse_con_broker(self,ident):
+    self.socket_broker.identity = u"Worker-{}".format(ident).encode("ascii")
+    self.socket_broker.connect("ipc://backend.ipc")
+
+    # Tell broker we're ready for work
+    self.socket_broker.send(b"READY")
+
+    while True:
+        address, empty, request = self.socket_broker.recv_multipart()
+        print("{}: {}".format(self.socket_broker.identity.decode("ascii"),
+                              request.decode("ascii")))
+        self.socket_broker.send_multipart([address, b"", b"OK"])
+  
+  
 
   def comunicar_estado_health_checker(self):
     while True:
@@ -118,11 +150,12 @@ class ServidorCentral:
     print(f"{RED}Solicitud no atendida guardada en lista de peticiones fallidas.{RESET}")
     return {"estatus": False, "laboratoriosDisponibles": False}
 
+  '''
   def escuchar_peticiones(self) -> None:
     print(f"{CYAN}Escuchando peticiones de las broker en el puerto: 5555...{RESET}")
     
     while True:
-      identity, raw_msg = self.socket_broker.recv_multipart()
+      raw_msg = self.socket_broker.recv()
       peticion = zmq.utils.jsonapi.loads(raw_msg)
       if isinstance(peticion, dict) and 'nombreFacultad' in peticion and 'nombrePrograma' in peticion:
         print(f"{YELLOW}Petición de {peticion['nombreFacultad']} - Programa {peticion['nombrePrograma']}{RESET}")
@@ -151,7 +184,7 @@ class ServidorCentral:
           print(f"{RED}El broker rechazó la reserva.{RESET}") # Devolvemos recursos asignados
           self.num_salones += peticion.get("numSalones",0)
           self.num_laboratorios += peticion.get("numLaboratorios",0)
-
+      '''
   def cerrar_comunicacion(self) -> None:
     self.socket_broker.close()
     self.socket_health_checker.close()

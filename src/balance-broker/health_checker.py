@@ -91,6 +91,3 @@ if __name__ == "__main__":
   health_checker = HealthChecker()
   health_checker.crear_conexion()
   health_checker.escuchar_ping_servidor_central()
-
-if __name__ == "__main__":
-    main()

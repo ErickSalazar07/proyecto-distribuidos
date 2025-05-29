@@ -31,29 +31,34 @@ Para instalar las dependencias necesarias, ejecutar:
 pip install pyzmq
 ```
 
-Para ejecutar cada componente del proyecto, utilizar los siguientes comandos en la raíz del proyecto:
+Para ejecutar cada componente del proyecto, utilizar los siguientes comandos en el directorio correspondiente a la version del proyecto
+
+## request-reply(asincrono)
+
+### Health checker
+```bash
+python health_checker.py
+```
+
+### Servidor central
+```bash
+python servidor_central.py
+```
+
+### Facultad
+```bash
+python facultad.py -n Ciencias -s 05-2025 -ip-p-s localhost:5555 -puerto-escuchar 5556
+```
 
 ### Programa académico
 ```bash
-python src/rep-req-asinc/programa_academico.py
-```
-### Facultad
-```bash
-python src/rep-req-asinc/facultad.py
-```
-### Servidor central
-```bash
-python src/rep-req-asinc/servidor_central.py
-```
-### Servidor respaldo
-```bash
-python src/rep-req-asinc/servidor_respaldo.py
-```
-### Health checker
-```bash
-python src/rep-req-asinc/health_checker.py
+python programa_academico.py -n Matematicas -s 05-2025 -num-s 8 -num-l 3 -ip-p-f localhost:5556
 ```
 
+### Servidor respaldo
+```bash
+python servidor_respaldo.py
+```
 ---
 
 ## Digramas del Sistema

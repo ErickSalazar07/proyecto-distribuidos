@@ -22,7 +22,6 @@ class Facultad:
   context:zmq.Context
   socket_broker:zmq.Socket
   socket_programas:zmq.Socket
-  socket_health_checker:zmq.Socket
 
 # Metodos de la clase
 
@@ -36,13 +35,11 @@ class Facultad:
     self.nombre = ""
     self.semestre = None
     self.ip_puerto_broker = ""
-    #self.ip_puerto_health_checker = "10.43.96.80:5553"
-    self.ip_puerto_health_checker = "localhost:5553"
+    
     self.puerto_escuchar_programas = ""
     self.context = None
     self.socket_broker = None
     self.socket_programas = None
-    self.socket_health_checker = None
 
     for i in range(1,len(sys.argv)):
       if sys.argv[i] == "-n":
@@ -101,15 +98,10 @@ class Facultad:
     self.socket_programas = self.context.socket(zmq.REP) # Socket sincrono. 
     self.socket_programas.bind(f"tcp://*:{self.puerto_escuchar_programas}")
     
-    # Se inicializa el canal para comunicarse con el health_checker
-    self.socket_health_checker = self.context.socket(zmq.SUB)
-    self.socket_health_checker.connect(f"tcp://{self.ip_puerto_health_checker}")
-    self.socket_health_checker.setsockopt_string(zmq.SUBSCRIBE,"")
 
     # Se crea un canal y se inicializa en el ip y puerto que se ingresan por comando
     self.socket_broker = self.context.socket(zmq.REQ)
     self.socket_broker.connect(f"tcp://{self.ip_puerto_broker}")
-    self.iniciar_escucha_health_checker()
 
     # Inicia hilo para escuchar actualizaciones
 
@@ -152,7 +144,6 @@ class Facultad:
   def cerrar_comunicacion(self) -> None:
     self.socket_programas.close()
     self.socket_broker.close()
-    self.socket_health_checker.close()
     self.context.term()
 
 # Seccion main del programa

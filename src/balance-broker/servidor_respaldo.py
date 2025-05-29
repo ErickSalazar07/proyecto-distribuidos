@@ -198,13 +198,15 @@ class ServidorCentral:
     self.db.write(f"Laboratorios: {self.num_laboratorios}\n")
     self.db.close()
 
-def iniciarServidor():
+def run_server(stop_event: threading.Event):
   servidor_central = ServidorCentral()
   servidor_central.crear_comunicacion()
+  print("[server-Respaldo] Iniciado ")
   try:
-    servidor_central.crear_workers()
-    for worker in servidor_central.workers:
-      worker.join()
+    while not stop_event.is_set():
+      servidor_central.crear_workers()
+      for worker in servidor_central.workers:
+        worker.join()
   except KeyboardInterrupt:
     print(f"\n{RED}Servidor detenido manualmente.{RESET}")
     print(f"{YELLOW}Solicitudes fallidas almacenadas:{RESET}")
@@ -213,6 +215,7 @@ def iniciarServidor():
   finally:
     servidor_central.cerrar_comunicacion()
     servidor_central.cerrar_db()
+    print("[server-Respaldo] Detenido")
 
 def traer_archivo_central():
   i = 1
@@ -224,7 +227,7 @@ def main():
     req_hc = ctx_hc.socket(zmq.REQ)
     req_hc.connect(HEALTH_CHECKER_ADDR)
 
-    broker_thread = None
+    server_thread = None
     stop_event = threading.Event()
 
     print("[Respaldo] Comenzando ciclo de espera de arranque...")
@@ -236,22 +239,22 @@ def main():
 
         if respuesta == "START":
             # Si no está corriendo, arrancamos el broker
-            if broker_thread is None or not broker_thread.is_alive():
-                print("[Respaldo] Autorizado: iniciando broker de respaldo...")
+            if server_thread is None or not server_thread.is_alive():
+                print("[Respaldo] Autorizado: iniciando server de respaldo...")
                 stop_event.clear()
-                broker_thread = threading.Thread(
-                    target=run_broker,
+                server_thread = threading.Thread(
+                    target=run_server,
                     args=(stop_event,),
                     daemon=True
                 )
-                broker_thread.start()
+                server_thread.start()
         else:  # respuesta == "WAIT"
             # Si el broker está corriendo, lo detenemos
-            if broker_thread is not None and broker_thread.is_alive():
+            if server_thread is not None and server_thread.is_alive():
                 print("[Respaldo] Indicaron WAIT: deteniendo broker de respaldo...")
                 stop_event.set()
-                broker_thread.join()
-                broker_thread = None
+                server_thread.join()
+                server_thread = None
 
         # Esperamos antes de volver a preguntar
         time.sleep(1)

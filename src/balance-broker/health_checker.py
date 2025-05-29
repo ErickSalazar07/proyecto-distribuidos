@@ -37,7 +37,7 @@ class HealthChecker:
     self.socket_servidor_principal = self.context.socket(zmq.PULL)
     self.socket_servidor_principal.bind("tcp://*:5550")
 
-    # Socket para publicar estado facultades (PUB)
+    # Socket para publicar estado broker (REP)
     self.socket_broker = self.context.socket(zmq.REP)
     self.socket_broker.bind(f"tcp://*:{self.puerto_publicaciones}")
 
@@ -64,7 +64,7 @@ class HealthChecker:
 
     while True:
       # Espera hasta 2 segundos por el ping o respuesta del servidor
-      socks = dict(poller.poll(timeout=2000)) # 2000 ms = 2 segundos
+      socks = dict(poller.poll(timeout=3500)) # 2000 ms = 2 segundos
 
       if self.socket_servidor_principal in socks:
         mensaje = self.socket_servidor_principal.recv_json()

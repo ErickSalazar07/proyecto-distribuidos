@@ -1,6 +1,7 @@
 from datetime import datetime,date
 import zmq
 import sys
+import threading
 
 # Colores para visualizar mejor la salida estandar.
 RED = "\033[91m"
@@ -20,16 +21,18 @@ class Facultad:
   ip_puerto_servidor:str
   ip_puerto_health_checker:str
   puerto_escuchar_programas:str
+  puerto_escuchar_autenticaciones:str
   context:zmq.Context
   socket_servidor:zmq.Socket
   socket_programas:zmq.Socket
+  socket_programas_autenticacion:zmq.Socket
   socket_health_checker:zmq.Socket
 
 # Metodos de la clase
 
   def __init__(self):
 
-    if len(sys.argv) != 9:
+    if len(sys.argv) != 11:
       print(f"Error: El numero de argumentos no es valido. Recuerde.\n\n")
       self.error_args()
       sys.exit(-1)
@@ -40,6 +43,7 @@ class Facultad:
     #self.ip_puerto_health_checker = "10.43.96.80:5553"
     self.ip_puerto_health_checker = "localhost:5553"
     self.puerto_escuchar_programas = ""
+    self.puerto_escuchar_autenticaciones = ""
     self.context = None
     self.socket_servidor = None
     self.socket_programas = None
@@ -54,6 +58,8 @@ class Facultad:
         self.ip_puerto_servidor = sys.argv[i+1]
       elif sys.argv[i] == "-puerto-escuchar":
         self.puerto_escuchar_programas = sys.argv[i+1]
+      elif sys.argv[i] == "-p-aut":
+        self.puerto_escuchar_autenticaciones = sys.argv[i+1]
 
     if not self.campos_validos():
       print(f"Error: Los campos no son validos. Recuerde.\n\n")
@@ -63,6 +69,46 @@ class Facultad:
     print("Informacion de la facultad:\n")
     print(self)
   
+  def autenticar_usuarios(self):
+    while(True):
+      try:
+        # Esperar peticion en el puerto
+        peticion:dict = self.socket_programas_autenticacion.recv_json() # Recibe la peticion de autenticacion de algun programa academico
+        usuario:str = peticion.get("usuario",0)
+        contrasena:str = peticion.get("contrasena",0)
+
+        es_usuario_valido:bool = self.verificar_credenciales(nombre_usuario=usuario,contraseña=contrasena)
+
+        if es_usuario_valido:
+          self.socket_programas_autenticacion.send_string("y") # Responde al programa si el usuario es valido con (y,n) si o no
+          continue
+        self.socket_programas_autenticacion.send_string("n")
+      except Exception as e:
+          print(f"{RED}Error al procesar a un usuario {e}{RESET}")
+
+  def verificar_credenciales(self, nombre_usuario:str, contraseña:str, archivo:str='usuarios.txt') -> bool:
+    try:
+        with open(archivo, 'r') as f:
+            for linea in f:
+                linea = linea.strip()
+                if not linea:
+                    continue  # omitir líneas vacías
+                usuario, passw = linea.split(':', 1)
+                if usuario == nombre_usuario and passw == contraseña:
+                    return True
+        return False
+    except FileNotFoundError:
+        print(f"El archivo {archivo} no existe.")
+        return False
+    except Exception as e:
+        print(f"Ocurrió un error: {e}")
+        return False
+
+  def crear_comunicacion_autenticacion(self):
+    self.socket_programas_autenticacion = self.context.socket(zmq.REP) # Socket sincrono. 
+    self.socket_programas_autenticacion.bind(f"tcp://*:{self.puerto_escuchar_autenticaciones}")
+
+
   def guardar_peticion_archivo(self,peticion:dict):
     nombre_archivo = f"{peticion['semestre']}.txt"
     peticion_txt = f"Programa Academico: {peticion['nombrePrograma']}, Salones: {peticion['numSalones']}, Laboratorios: {peticion['numLaboratorios']}\n"
@@ -96,17 +142,19 @@ class Facultad:
     print(f"-s \"mm-yyyy\": Es el semestre, el cual debe seguir el formato propuesto")
     print(f"-ip-p-s \"ip_servidor:puerto_servidor\": Es la ip y el puerto del servidor separados por ':'")
     print(f"-puerto-escuchar \"puerto_escuchar_programas\": Es el puerto por el cual la facultad va a escuchar las peticiones de los programas")
+    print(f"-p-aut \"puerto_escuchar_usuarios\": Es el puerto por el cual la facultad va a escuchar las peticiones de autenticacion de los programas")
 
   def campos_validos(self) -> bool:
     return self.nombre != "" and self.semestre != None and self.ip_puerto_servidor != "" \
-    and self.puerto_escuchar_programas != ""
+    and self.puerto_escuchar_programas != "" and self.puerto_escuchar_autenticaciones != ""
 
   def __str__(self) -> str:
     return\
       f"Nombre: {self.nombre}\n"\
     + f"Semestre: {self.semestre}\n"\
     + f"Ip servidor: Puerto servidor => {self.ip_puerto_servidor}\n"\
-    + f"Puerto escuchar peticions programas: {self.puerto_escuchar_programas}\n\n"
+    + f"Puerto escuchar peticions programas: {self.puerto_escuchar_programas}\n"\
+    + f"Puerto escuchar peticiones de autenticacion: {self.puerto_escuchar_autenticaciones}\n\n"\
 
   def crear_comunicacion(self) -> None:
     # Se crea el context(clase para manejar instancias de los diferentes sockets)
@@ -120,9 +168,14 @@ class Facultad:
     self.socket_health_checker = self.context.socket(zmq.REQ)
     self.socket_health_checker.connect(f"tcp://{self.ip_puerto_health_checker}")
 
+    # Se inicializa el canal para autenticar usuarios
+    self.crear_comunicacion_autenticacion()
+
     # Se crea un canal y se inicializa en el ip y puerto que se ingresan por comando
     self.socket_servidor = self.context.socket(zmq.DEALER)
     self.socket_servidor.connect(f"tcp://{self.ip_puerto_servidor}")
+    hilo_autenticacion = threading.Thread(target=facultad.autenticar_usuarios) # Hilo para las autenticaciones
+    hilo_autenticacion.start()
 
   def actualizar_servidor(self):
     self.socket_health_checker.send_json({"estadoServidor":True})

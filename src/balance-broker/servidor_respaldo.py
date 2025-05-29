@@ -198,7 +198,7 @@ class ServidorCentral:
     self.db.write(f"Laboratorios: {self.num_laboratorios}\n")
     self.db.close()
 
-def iniciarServidor():
+def run_server(stop_event: threading.Event):
   servidor_central = ServidorCentral()
   servidor_central.crear_comunicacion()
   try:

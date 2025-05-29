@@ -79,7 +79,7 @@ class ServidorCentral:
     self.context = zmq.Context()
     
     # Comunicacion con broker
-    self.socket_broker = self.context.socket(zmq.ROUTER)
+    self.socket_broker = self.context.socket(zmq.REQ)
     self.socket_broker.bind("tcp://*:5555")
     
     # Comunicacion con health checker

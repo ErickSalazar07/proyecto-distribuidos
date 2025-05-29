@@ -1,130 +1,139 @@
-# broker_proxy.py
+# brokersProxy.py
 
+import sys
+import threading
 import zmq
 
+# Colores para output en consola
+RED = "\033[91m"
+GREEN = "\033[92m"
+YELLOW = "\033[93m"
+CYAN = "\033[96m"
+RESET = "\033[0m"
+
+
 class Broker:
-  
-# Atributos de la clase
-
-    ip_puerto_health_checker :str
-    socket_health_checker:zmq.Socket
-    ip_puerto_servidor :str
-    socket_broker:zmq.Socket
-    puerto_escuchar_facultad:str
-    socket_facultades = None
-
-
-
     def __init__(self):
-        #self.ip_puerto_health_checker = "10.43.96.80:5553"
+        # Dirección (IP:PUERTO) del Health Checker
         self.ip_puerto_health_checker = "localhost:5553"
-        self.socket_health_checker = None
-        self.ip_puerto_servidor = ""
-        self.socket_broker = None
+        # Puerto en el que el broker recibirá peticiones de las Facultades
+        # (debe coincidir con lo que ellas usan en "-ip-p-s")
+        self.puerto_escuchar_facultad = "5555"
+
+        # Contexto y sockets de ZeroMQ
+        self.context = None
+        self.frontend = None    # ROUTER  ← Facultades
+        self.backend = None     # DEALER  → Servidores (Central o Respaldo)
+        self.socket_health_checker = None  # SUB   ← Health Checker
+
+        # Para guardar la dirección (IP:PUERTO) del servidor actualmente activo
+        self.current_backend_ip = None
 
 
-    def actualizar_servidor_activo(self,estado): #CREO QUE ESTO IRIA EN EL BROCKER MAS QUE EN EL CLIENTE PREGUNTAR A LAS 8
-        ip_puerto = estado["ipPuerto"]
-        if hasattr(self,"ip_puerto_servidor") and self.ip_puerto_servidor == ip_puerto:
-          return
-    
-        try:
-          if hasattr(self,"socket_servidor"):
-            self.socket_servidor.close()
-          
-          self.socket_servidor = self.context.socket(zmq.DEALER)
-          self.socket_servidor.connect(f"tcp://{ip_puerto}")
-          self.ip_puerto_servidor = ip_puerto
-          print(f"{GREEN}✅ Conectado al servidor {estado['servidor_activo']} ({ip_puerto}){RESET}")
-        except Exception as e:
-          print(f"{RED}Error al conectar al servidor {ip_puerto}: {e}{RESET}")
-    
-    def iniciar_escucha_health_checker(self):
-        import threading
-        def escuchar_actualizaciones():
-          while True:
-            try:
-              estado = self.socket_health_checker.recv_json()
-              print(f"{CYAN}Actualizacion recibida del health_checker: {estado}{RESET}")
-              self.actualizar_servidor_activo(estado)
-            except Exception as e:
-              print(f"{RED}Error al recibir actualizacion: {e}{RESET}")
-        threading.Thread(target=escuchar_actualizaciones,daemon=True).start()
-    
     def crear_comunicacion(self) -> None:
-        # Se crea el context(clase para manejar instancias de los diferentes sockets)
+        """Inicializa el contexto, el ROUTER (frontend), el SUB (health)
+           y arranca el hilo que escucha actualizaciones del Health Checker."""
         self.context = zmq.Context()
-    
-    
-        # Se inicializa el canal para comunicarse con facultades
-    
-        frontend = context.socket(zmq.ROUTER)
-        frontend.bind(f"tcp://{self.puerto_escuchar_facultad}")  # broker frontend
-    
-        # Se inicializa el canal para comunicarse con el health_checker
+
+        # 1) FRONTEND: ROUTER para recibir de las Facultades
+        self.frontend = self.context.socket(zmq.ROUTER)
+        # Bind al puerto en el que las Facultades harán REQ → BROKER
+        self.frontend.bind(f"tcp://*:{self.puerto_escuchar_facultad}")
+        print(f"{GREEN}Broker: frontend ROUTER escuchando en tcp://*:{self.puerto_escuchar_facultad}{RESET}")
+
+        # 2) BACKEND: DEALER para reenviar a los Servidores (inicialmente no conectado)
+        #    Esperaremos a que llegue el primer estado del Health Checker para conectar.
+        self.backend = self.context.socket(zmq.DEALER)
+        # (No hacemos bind ni connect aquí; se hará en actualizar_servidor_activo())
+
+        # 3) HEALTH_CHECKER: SUB para recibir actualizaciones de qué servidor está activo
         self.socket_health_checker = self.context.socket(zmq.SUB)
         self.socket_health_checker.connect(f"tcp://{self.ip_puerto_health_checker}")
-        self.socket_health_checker.setsockopt_string(zmq.SUBSCRIBE,"")
-    
-        # Se crea un canal y se inicializa en el ip y puerto que se ingresan por comando
-        self.socket_broker = self.context.socket(zmq.ROUTER)
-        self.socket_broker.connect(f"tcp://{self.ip_puerto_servidor}")
-        self.iniciar_escucha_health_checker()
-    
-        # Inicia hilo para escuchar actualizaciones
-    
-    def recibir_peticion(self) -> dict:
-        print(f"{CYAN}Recibiendo peticion en el puerto: {self.puerto_escuchar_facultad}...{RESET}")
-        peticion:dict = self.socket_facultades.recv_json() # Recibe la peticion de algun programa academico
-        print(f"{GREEN}Peticion recibida.\n{RESET}")
-        print(f"{YELLOW}Peticion: {peticion}{RESET}")
-        self.socket_facultades.send_string("y") # Responde al programa academico con (y,n) si o no
-        return peticion
-    
-    def enviar_peticion_servidor(self, peticion_enviar: dict) -> bool:
-        if not hasattr(self, 'socket_servidor') or self.socket_servidor.closed:
-            print(f"{RED}Error: No hay conexión activa con el servidor{RESET}")
-            return False
-        print(f"{MAGENTA}Enviando petición al servidor...{RESET}")
-        try:
-            self.socket_servidor.send_json(peticion_enviar)
-            if self.socket_servidor.poll(timeout=5000):  # Timeout de 5 segundos
-                respuesta = self.socket_servidor.recv_json()
-                print(f"{BLUE}Respuesta del servidor: {respuesta}{RESET}")
-                return respuesta.get("respuesta", "").lower() == "y"
-            else:
-                print(f"{RED}Timeout: No se recibió respuesta del servidor{RESET}")
-                return False
-        except Exception as e:
-            print(f"{RED}Error al enviar petición al servidor: {e}{RESET}")
-            return False
-        
+        self.socket_health_checker.setsockopt_string(zmq.SUBSCRIBE, "")
+        print(f"{GREEN}Broker: SUB conectado a Health Checker en tcp://{self.ip_puerto_health_checker}{RESET}")
 
-    def comunicar_peticiones(self) -> None:
-        print("Escuchando peticiones de los programas academicos.")
+        # 4) Arrancamos hilo para procesar mensajes del Health Checker
+        thread = threading.Thread(target=self._escuchar_health_checker, daemon=True)
+        thread.start()
+
+
+    def _escuchar_health_checker(self) -> None:
+        """Función que corre en un hilo daemon. Se queda bloqueado recibiendo
+           mensajes JSON del Health Checker y llama a actualizar_servidor_activo()."""
         while True:
-           peticion_programa = self.recibir_peticion()
-           self.enviar_peticion_servidor(peticion_programa)
+            try:
+                estado = self.socket_health_checker.recv_json()
+                # Ejemplo de estado recibido:
+                #   { "servidorActivo": "principal", "ipPuerto": "localhost:5560" }
+                print(f"{CYAN}Broker: mensaje Health Checker → {estado}{RESET}")
+                self.actualizar_servidor_activo(estado)
+            except zmq.ZMQError as e:
+                print(f"{RED}Broker: ZMQError al leer Health Checker: {e}{RESET}")
+                break
+            except Exception as e:
+                print(f"{RED}Broker: Error inesperado en hilo Health Checker: {e}{RESET}")
+                break
 
-    def cerrar_comunicacion(self) -> None:
-        self.socket_servidor.close()
-        self.socket_broker.close()
-        self.socket_health_checker.close()
-        self.context.term()
+
+    def actualizar_servidor_activo(self, estado: dict) -> None:
+        """
+        Cada vez que el Health Checker publique un JSON con el servidor activo,
+        reconfiguramos el socket DEALER (backend) para conectarse al IP:PUERTO correcto.
+        """
+        ip_puerto = estado.get("ipPuerto")
+        if not ip_puerto:
+            return
+
+        # Si ya estábamos conectados a esa misma dirección, no hacemos nada
+        if ip_puerto == self.current_backend_ip:
+            return
+
+        # Si había una conexión anterior, la cerramos
+        if self.current_backend_ip is not None:
+            try:
+                self.backend.close()
+            except Exception:
+                pass
+
+            # Creamos un socket NUEVO cada vez que cambia el servidor
+            self.backend = self.context.socket(zmq.DEALER)
+
+        # Conectamos el nuevo DEALER al servidor activo
+        self.backend.connect(f"tcp://{ip_puerto}")
+        self.current_backend_ip = ip_puerto
+        print(f"{YELLOW}Broker: conectado (backend DEALER) a → tcp://{ip_puerto}{RESET}")
+
+
+    def start(self) -> None:
+        """
+        Una vez que el Health Checker haya enviado al menos un estado,
+        podemos arrancar el proxy que interconecta frontend (ROUTER) y backend (DEALER).
+        """
+        # Si todavía no tenemos backend conectado, esperamos un poco
+        if self.current_backend_ip is None:
+            print(f"{YELLOW}Broker: esperando que Health Checker indique el servidor activo...{RESET}")
+            # Un breve sleep para dar tiempo a que Health Checker publique
+            # (en un sistema real, quizá usarías synchronización o poller en ambos sockets)
+            import time; time.sleep(1)
+
+        print(f"{GREEN}Broker: iniciando proxy ROUTER ⇄ DEALER{RESET}")
+        try:
+            zmq.proxy(self.frontend, self.backend)
+        except zmq.ContextTerminated:
+            # El contexto fue cerrado externamente
+            pass
+        except Exception as e:
+            print(f"{RED}Broker: Proxy interrumpido: {e}{RESET}")
+        finally:
+            self.frontend.close()
+            self.backend.close()
+            self.context.term()
+
 
 def main():
-
-    broker:Broker = Broker()
+    broker = Broker()
     broker.crear_comunicacion()
-
-    context = zmq.Context()
-
-    try:
-        broker.comunicar_peticiones()
-    except KeyboardInterrupt:
-        print(f"\n{YELLOW}broker detenido manualmente.{RESET}")
-    finally:
-        broker.cerrar_comunicacion()
+    broker.start()
 
 
 if __name__ == "__main__":

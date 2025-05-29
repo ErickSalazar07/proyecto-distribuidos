@@ -139,7 +139,6 @@ class ServidorCentral:
       }
 
       self.socket_broker.send_json(respuesta)
-      self.socket_broker.send_multipart([identity,zmq.utils.jsonapi.dumps(respuesta)])
 
       if reserva_exitosa:
         # Esperar confirmación de aceptación de la facultad

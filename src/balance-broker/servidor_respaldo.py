@@ -201,10 +201,12 @@ class ServidorCentral:
 def run_server(stop_event: threading.Event):
   servidor_central = ServidorCentral()
   servidor_central.crear_comunicacion()
+  print("[server-Respaldo] Iniciado ")
   try:
-    servidor_central.crear_workers()
-    for worker in servidor_central.workers:
-      worker.join()
+    while not stop_event.is_set():
+      servidor_central.crear_workers()
+      for worker in servidor_central.workers:
+        worker.join()
   except KeyboardInterrupt:
     print(f"\n{RED}Servidor detenido manualmente.{RESET}")
     print(f"{YELLOW}Solicitudes fallidas almacenadas:{RESET}")
@@ -213,6 +215,7 @@ def run_server(stop_event: threading.Event):
   finally:
     servidor_central.cerrar_comunicacion()
     servidor_central.cerrar_db()
+    print("[server-Respaldo] Detenido")
 
 
 def main():

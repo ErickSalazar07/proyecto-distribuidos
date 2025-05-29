@@ -21,7 +21,7 @@ class Facultad:
   ip_puerto_health_checker:str
   puerto_escuchar_programas:str
   context:zmq.Context
-  socket_servidor:zmq.Socket
+  socket_broker:zmq.Socket
   socket_programas:zmq.Socket
   socket_health_checker:zmq.Socket
 
@@ -41,7 +41,7 @@ class Facultad:
     self.ip_puerto_health_checker = "localhost:5553"
     self.puerto_escuchar_programas = ""
     self.context = None
-    self.socket_servidor = None
+    self.socket_broker = None
     self.socket_programas = None
     self.socket_health_checker = None
 
@@ -74,7 +74,7 @@ class Facultad:
     except Exception as e:
       print(f"Error al guardar la petición: {e}")
 
-  def actualizar_servidor_activo(self,estado):
+  def actualizar_servidor_activo(self,estado): #CREO QUE ESTO IRIA EN EL BROCKER MAS QUE EN EL CLIENTE PREGUNTAR A LAS 8
     ip_puerto = estado["ipPuerto"]
     if hasattr(self,"ip_puerto_servidor") and self.ip_puerto_servidor == ip_puerto:
       return
@@ -122,8 +122,8 @@ class Facultad:
     self.socket_health_checker.setsockopt_string(zmq.SUBSCRIBE,"")
 
     # Se crea un canal y se inicializa en el ip y puerto que se ingresan por comando
-    self.socket_servidor = self.context.socket(zmq.DEALER)
-    self.socket_servidor.connect(f"tcp://{self.ip_puerto_servidor}")
+    self.socket_broker = self.context.socket(zmq.REQ)
+    self.socket_broker.connect(f"tcp://{self.ip_puerto_broker}")
     self.iniciar_escucha_health_checker()
 
     # Inicia hilo para escuchar actualizaciones
@@ -150,25 +150,23 @@ class Facultad:
     peticion["nombreFacultad"] = self.nombre
     return peticion
 
-  def enviar_peticion_servidor(self, peticion_enviar: dict) -> bool:
-    if not hasattr(self, 'socket_servidor') or self.socket_servidor.closed:
-      print(f"{RED}Error: No hay conexión activa con el servidor{RESET}")
-      return False
-    print(f"{MAGENTA}Enviando petición a servidor...{RESET}")
+  def enviar_peticion_broker(self, peticion_enviar: dict) -> bool:
+    if not hasattr(self, 'socket_broker') or self.socket_broker.closed:
+        print(f"{RED}Error: No hay conexión activa con el broker{RESET}")
+        return False
+    print(f"{MAGENTA}Enviando petición al broker...{RESET}")
     try:
-        # Envía la petición como mensaje multipart (necesario para ROUTER-DEALER)
-        self.socket_servidor.send_json(peticion_enviar)
-        if self.socket_servidor.poll(timeout=5000):  # Timeout de 5 segundos
-          respuesta = self.socket_servidor.recv_json()
-          print(f"{BLUE}Respuesta del servidor: {respuesta}{RESET}")
-            # Procesar respuesta...
-          return respuesta.get("respuesta", "").lower() == "y"
+        self.socket_broker.send_json(peticion_enviar)
+        if self.socket_broker.poll(timeout=5000):  # Timeout de 5 segundos
+            respuesta = self.socket_broker.recv_json()
+            print(f"{BLUE}Respuesta del broker: {respuesta}{RESET}")
+            return respuesta.get("respuesta", "").lower() == "y"
         else:
-          print(f"{RED}Timeout: No se recibió respuesta del servidor{RESET}")
-          return False
+            print(f"{RED}Timeout: No se recibió respuesta del broker{RESET}")
+            return False
     except Exception as e:
-      print(f"{RED}Error al enviar petición: {e}{RESET}")
-      return False
+        print(f"{RED}Error al enviar petición al broker: {e}{RESET}")
+        return False
 
 
   def comunicar_peticiones(self) -> None:

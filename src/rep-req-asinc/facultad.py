@@ -165,9 +165,8 @@ class Facultad:
     self.socket_programas.bind(f"tcp://*:{self.puerto_escuchar_programas}")
     
     # Se inicializa el canal para comunicarse con el health_checker
-    self.socket_health_checker = self.context.socket(zmq.SUB)
+    self.socket_health_checker = self.context.socket(zmq.REQ)
     self.socket_health_checker.connect(f"tcp://{self.ip_puerto_health_checker}")
-    self.socket_health_checker.setsockopt_string(zmq.SUBSCRIBE,"")
 
     # Se inicializa el canal para autenticar usuarios
     self.crear_comunicacion_autenticacion()
@@ -175,21 +174,15 @@ class Facultad:
     # Se crea un canal y se inicializa en el ip y puerto que se ingresan por comando
     self.socket_servidor = self.context.socket(zmq.DEALER)
     self.socket_servidor.connect(f"tcp://{self.ip_puerto_servidor}")
-    self.iniciar_escucha_health_checker() # Inicia hilo para escuchar actualizaciones
     hilo_autenticacion = threading.Thread(target=facultad.autenticar_usuarios) # Hilo para las autenticaciones
     hilo_autenticacion.start()
 
-  def iniciar_escucha_health_checker(self):
-    import threading
-    def escuchar_actualizaciones():
-      while True:
-        try:
-          estado = self.socket_health_checker.recv_json()
-          print(f"{CYAN}Actualizacion recibida del health_checker: {estado}{RESET}")
-          self.actualizar_servidor_activo(estado)
-        except Exception as e:
-          print(f"{RED}Error al recibir actualizacion: {e}{RESET}")
-    threading.Thread(target=escuchar_actualizaciones,daemon=True).start()
+  def actualizar_servidor(self):
+    self.socket_health_checker.send_json({"estadoServidor":True})
+    respuesta = self.socket_health_checker.recv_json()
+    self.ip_puerto_servidor = respuesta.get("ipPuerto")
+    print(f"Servidor activo: {respuesta.get("servidorActivo")}")
+    print(f"Respuesta: {respuesta}")
 
   def recibir_peticion(self) -> dict:
     print(f"{CYAN}Recibiendo peticion en el puerto: {self.puerto_escuchar_programas}...{RESET}")
@@ -201,32 +194,25 @@ class Facultad:
     peticion["nombreFacultad"] = self.nombre
     return peticion
 
-  def enviar_peticion_servidor(self, peticion_enviar: dict) -> bool:
-    if not hasattr(self, 'socket_servidor') or self.socket_servidor.closed:
+  def enviar_peticion_servidor(self,peticion_enviar:dict) -> bool:
+    if not hasattr(self,"socket_servidor") or self.socket_servidor.closed:
       print(f"{RED}Error: No hay conexión activa con el servidor{RESET}")
       return False
-    print(f"{MAGENTA}Enviando petición a servidor...{RESET}")
-    try:
-        # Envía la petición como mensaje multipart (necesario para ROUTER-DEALER)
-        self.socket_servidor.send_json(peticion_enviar)
-        if self.socket_servidor.poll(timeout=5000):  # Timeout de 5 segundos
-          respuesta = self.socket_servidor.recv_json()
-          print(f"{BLUE}Respuesta del servidor: {respuesta}{RESET}")
-            # Procesar respuesta...
-          return respuesta.get("respuesta", "").lower() == "y"
-        else:
-          print(f"{RED}Timeout: No se recibió respuesta del servidor{RESET}")
-          return False
-    except Exception as e:
-      print(f"{RED}Error al enviar petición: {e}{RESET}")
-      return False
-
+    print(f"Preguntando por el servidor activo")
+    self.actualizar_servidor()
+    print(f"Servidor activo = {self.ip_puerto_servidor}")
+    self.socket_servidor.send_json(peticion_enviar)
+    respuesta = self.socket_servidor.recv_json()
+    print(f"{BLUE}Respuesta del servidor: {respuesta}{RESET}")
+    return True
 
   def comunicar_peticiones(self) -> None:
     print("Escuchando peticiones de los programas academicos.")
     while True:
       peticion_programa = self.recibir_peticion()
-      self.enviar_peticion_servidor(peticion_programa)
+      estado_peticion = self.enviar_peticion_servidor(peticion_programa)
+      if estado_peticion == True:
+        self.socket_servidor.send_json({"confirmacion":True})
 
   def cerrar_comunicacion(self) -> None:
     self.socket_programas.close()

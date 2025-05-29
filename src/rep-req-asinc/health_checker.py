@@ -12,7 +12,7 @@ class HealthChecker:
   context:zmq.Context
   socket_servidor_principal:zmq.Socket
   socket_servidor_auxiliar:zmq.Socket
-  socket_publicacion:zmq.Socket
+  socket_facultades:zmq.Socket
   servidor_activo:str
 
 # Metodos de la clase
@@ -27,7 +27,7 @@ class HealthChecker:
     self.context = None
     self.socket_servidor_principal = None
     self.socket_servidor_auxiliar = None
-    self.socket_publicacion = None
+    self.socket_facultades = None
     self.servidor_activo = "principal"
 
   def crear_conexion(self):
@@ -38,25 +38,29 @@ class HealthChecker:
     self.socket_servidor_principal.bind("tcp://*:5550")
 
     # Socket para publicar estado facultades (PUB)
-    self.socket_publicacion = self.context.socket(zmq.PUB)
-    self.socket_publicacion.bind(f"tcp://*:{self.puerto_publicaciones}")
+    self.socket_facultades = self.context.socket(zmq.REP)
+    self.socket_facultades.bind(f"tcp://*:{self.puerto_publicaciones}")
 
-  def publicar_estado(self):
+  def comunicar_estado(self):
     while True:
-      estado = {
-        "servidorActivo": self.servidor_activo,
-        "ipPuerto": self.ip_puerto_servidor_principal if self.servidor_activo == "principal" else self.ip_puerto_servidor_auxiliar
-      }
-      self.socket_publicacion.send_json(estado)
-      print(f"📢 Publicando estado: {estado}")
-      time.sleep(1)
+      pregunta_facultades = self.socket_facultades.recv_json()
+    
+      if pregunta_facultades.get("estadoServidor") == True:
+        estado = {
+          "servidorActivo": self.servidor_activo,
+          "ipPuerto": self.ip_puerto_servidor_principal if self.servidor_activo == "principal" else self.ip_puerto_servidor_auxiliar
+        }
+        self.socket_facultades.send_json(estado)
+        print(f"📢 Publicando estado: {estado}")
+      else:
+        print(f"Peticion de facultad mal formada")
 
   def escuchar_ping_servidor_central(self):
     print("🩺 Health checker escuchando pings del servidor central o auxiliar...\n")
     poller = zmq.Poller()
     poller.register(self.socket_servidor_principal,zmq.POLLIN)
 
-    threading.Thread(target=self.publicar_estado,daemon=True).start()
+    threading.Thread(target=self.comunicar_estado,daemon=True).start()
 
     while True:
       # Espera hasta 2 segundos por el ping o respuesta del servidor

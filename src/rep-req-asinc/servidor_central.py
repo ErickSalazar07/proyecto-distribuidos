@@ -25,6 +25,7 @@ class ServidorCentral:
 
   def __init__(self):
 
+    self.db = None
     self.num_salones = 0
     self.num_laboratorios = 0
     self.solicitudes_fallidas = list()
@@ -36,9 +37,9 @@ class ServidorCentral:
     # self.ip_puerto_health_checker = "10.43.96.80:5550"
     
     self.cargar_db("db.txt")
-
     print("Informacion del servidor.\n\n")
     print(self)
+    self.db = open("db.txt","+w")
     
 
   def cargar_db(self,nombre_db:str):
@@ -50,6 +51,7 @@ class ServidorCentral:
             self.num_salones = int(linea.split(":")[1].strip())
           elif linea.startswith("Laboratorios:"):
             self.num_laboratorios = int(linea.split(":")[1].strip())
+        db.close()
     except Exception as e:
       print(f"{RED}Hubo un error leyendo el archivo: Error: {e}{RESET}")
 
@@ -83,7 +85,7 @@ class ServidorCentral:
         print(f"{BLUE}[Health Check] Estado enviado al health_checker.{RESET}")
       except Exception as e:
         print(f"{RED}[Health Check] Error al enviar estado: {e}{RESET}")
-      time.sleep(2) # Espera 5 segundo a enviar el siguiente ping o estado
+      time.sleep(2) # Espera 2 segundo a enviar el siguiente ping o estado
 
   def reservar_peticion(self,peticion:dict) -> dict:
     num_salones = peticion.get("numSalones",0)
@@ -104,52 +106,52 @@ class ServidorCentral:
   def escuchar_peticiones(self) -> None:
     print(f"{CYAN}Escuchando peticiones de las facultades en el puerto: 5555...{RESET}")
     
-    with open("db.txt","a") as db:
-      while True:
-        identity, raw_msg = self.socket_facultades.recv_multipart()
-        peticion = zmq.utils.jsonapi.loads(raw_msg)
+    while True:
+      identity, raw_msg = self.socket_facultades.recv_multipart()
+      peticion = zmq.utils.jsonapi.loads(raw_msg)
+      if isinstance(peticion, dict) and 'nombreFacultad' in peticion and 'nombrePrograma' in peticion:
+        print(f"{YELLOW}Petición de {peticion['nombreFacultad']} - Programa {peticion['nombrePrograma']}{RESET}")
+      else:
+        print(f"{RED}Petición recibida malformada o incompleta: {peticion}{RESET}")
+        continue  
+      print(f"{MAGENTA}Contenido: {peticion}{RESET}")
 
-        if isinstance(peticion, dict) and 'nombreFacultad' in peticion and 'nombrePrograma' in peticion:
-          print(f"{YELLOW}Petición de {peticion['nombreFacultad']} - Programa {peticion['nombrePrograma']}{RESET}")
+      reserva_exitosa:bool = self.reservar_peticion(peticion)
+      respuesta = {
+        "respuesta": "y" if reserva_exitosa else "n",
+        "salonesDisponibles": self.num_salones,
+        "laboratoriosDisponibles": self.num_laboratorios
+      }
+
+      self.socket_facultades.send_json(respuesta)
+      self.socket_facultades.send_multipart([identity,zmq.utils.jsonapi.dumps(respuesta)])
+
+      if reserva_exitosa:
+        # Esperar confirmación de aceptación de la facultad
+        _, raw_confirmacion = self.socket_facultades.recv_multipart()
+        confirmacion = zmq.utils.jsonapi.loads(raw_confirmacion)
+        if confirmacion.get("confirmacion") == True:
+          print(f"{GREEN}La facultad confirmó la reserva.{RESET}")
+          self.guardar_peticion_db(peticion)
         else:
-          print(f"{RED}Petición recibida malformada o incompleta: {peticion}{RESET}")
-          continue  
-        print(f"{MAGENTA}Contenido: {peticion}{RESET}")
-
-        reserva_exitosa:bool = self.reservar_peticion(peticion)
-
-        respuesta = {
-          "respuesta": "y" if reserva_exitosa else "n",
-          "salonesDisponibles": self.num_salones,
-          "laboratoriosDisponibles": self.num_laboratorios
-        }
-
-        self.socket_facultades.send_multipart([
-          identity,
-          zmq.utils.jsonapi.dumps(respuesta)
-        ])
-
-        if reserva_exitosa:
-          # Esperar confirmación de aceptación de la facultad
-          _, raw_confirmacion = self.socket_facultades.recv_multipart()
-          confirmacion = zmq.utils.jsonapi.loads(raw_confirmacion)
-          if confirmacion.get("confirmacion") == "aceptada":
-            print(f"{GREEN}La facultad confirmó la reserva.{RESET}")
-            self.guardar_peticion_db(peticion,db)
-          else:
-            print(f"{RED}La facultad rechazó la reserva.{RESET}") # Devolvemos recursos asignados
-            self.num_salones += peticion.get("numSalones",0)
-            self.num_laboratorios += peticion.get("numLaboratorios",0)
+          print(f"{RED}La facultad rechazó la reserva.{RESET}") # Devolvemos recursos asignados
+          self.num_salones += peticion.get("numSalones",0)
+          self.num_laboratorios += peticion.get("numLaboratorios",0)
 
   def cerrar_comunicacion(self) -> None:
     self.socket_facultades.close()
     self.socket_health_checker.close()
     self.context.term()
 
-  def guardar_peticion_db(self,peticion,db):
+  def guardar_peticion_db(self,peticion):
     peticion_txt = f"Nombre Facultad: {peticion['nombreFacultad']}, Nombre Programa: {peticion['nombrePrograma']}," \
       + f"Num Salones: {peticion['numSalones']}, Num Laboratorios: {peticion['numLaboratorios']}\n"
-    db.write(peticion_txt)
+    self.db.write(peticion_txt)
+
+  def cerrar_db(self):
+    self.db.write(f"Salones: {self.num_salones}\n")
+    self.db.write(f"Laboratorios: {self.num_laboratorios}\n")
+    self.db.close()
 
 if __name__ == "__main__":
   servidor_central = ServidorCentral()
@@ -163,3 +165,4 @@ if __name__ == "__main__":
       print(f"{idx}. {solicitud}")
   finally:
     servidor_central.cerrar_comunicacion()
+    servidor_central.cerrar_db()

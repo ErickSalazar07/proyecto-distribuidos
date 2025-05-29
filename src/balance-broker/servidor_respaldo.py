@@ -14,6 +14,7 @@ CYAN = "\033[96m"
 RESET = "\033[0m"
 
 CANT_WORKERS = 10
+HEALTH_CHECKER_ADDR = "tcp://localhost:5513"
 
 class ServidorCentral:
 

@@ -14,6 +14,7 @@ class HealthChecker:
   socket_servidor_auxiliar:zmq.Socket
   socket_broker:zmq.Socket
   servidor_activo:str
+  rep_arranque:zmq.Socket
 
 # Metodos de la clase
 
@@ -29,7 +30,7 @@ class HealthChecker:
     self.socket_servidor_auxiliar = None
     self.socket_broker = None
     self.servidor_activo = "principal"
-    self.rep_arranque
+    self.rep_arranque = None
     
 
   def crear_conexion(self):
@@ -44,8 +45,8 @@ class HealthChecker:
     self.socket_broker.bind(f"tcp://*:{self.puerto_publicaciones}")
 
 
-    self.rep_arranque = context.socket(zmq.REP)
-    self.rep_arranque.bind("tcp://*:5554")
+    self.rep_arranque = self.context.socket(zmq.REP)
+    self.rep_arranque.bind("tcp://*:5513")
 
   def comunicar_estado(self):
     while True:
@@ -78,15 +79,15 @@ class HealthChecker:
 
         if mensaje.get("estado") == "ok":
           self.servidor_activo = "principal"
-          rep_arranque.send_string("WAIT")
+          self.rep_arranque.send_string("WAIT")
         else:
           self.servidor_activo = "auxiliar"
-          rep_arranque.send_string("START")
+          self.rep_arranque.send_string("START")
         print(f"🔁 Servidor activo: {self.servidor_activo}\n")
       else:
         print("❌ No se recibió ping en 3.5 segundos. Cambiando de servidor...")
         self.servidor_activo = "auxiliar"
-        rep_arranque.send_string("START")
+        self.rep_arranque.send_string("START")
         print(f"⚠️ Nuevo servidor activo: {self.servidor_activo}\n")
 
 # Pseudo codigo:

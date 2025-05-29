@@ -76,18 +76,18 @@ class Facultad:
     print(f"Debe ingresar las banderas/opciones y sus argumentos correspondientes.\n")
     print(f"-n \"nombre_facultad\": Es el nombre de la facultad")
     print(f"-s \"mm-yyyy\": Es el semestre, el cual debe seguir el formato propuesto")
-    print(f"-ip-p-s \"ip_servidor:puerto_servidor\": Es la ip y el puerto del servidor separados por ':'")
+    print(f"-ip-p-s \"ip_broker:puerto_broker\": Es la ip y el puerto del broker separados por ':'")
     print(f"-puerto-escuchar \"puerto_escuchar_programas\": Es el puerto por el cual la facultad va a escuchar las peticiones de los programas")
 
   def campos_validos(self) -> bool:
-    return self.nombre != "" and self.semestre != None and self.ip_puerto_servidor != "" \
+    return self.nombre != "" and self.semestre != None and self.ip_puerto_broker != "" \
     and self.puerto_escuchar_programas != ""
 
   def __str__(self) -> str:
     return\
       f"Nombre: {self.nombre}\n"\
     + f"Semestre: {self.semestre}\n"\
-    + f"Ip servidor: Puerto servidor => {self.ip_puerto_servidor}\n"\
+    + f"Ip broker: Puerto broker => {self.ip_puerto_broker}\n"\
     + f"Puerto escuchar peticions programas: {self.puerto_escuchar_programas}\n\n"
 
   def crear_comunicacion(self) -> None:

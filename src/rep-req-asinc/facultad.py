@@ -2,6 +2,9 @@ from datetime import datetime,date
 import zmq
 import sys
 import threading
+from cryptography.fernet import Fernet
+import json
+
 
 # Colores para visualizar mejor la salida estandar.
 RED = "\033[91m"
@@ -11,6 +14,12 @@ BLUE = "\033[94m"
 MAGENTA = "\033[95m"
 CYAN = "\033[96m"
 RESET = "\033[0m"
+DARK_RED = "\033[31m"
+DARK_GREEN = "\033[32m"
+DARK_YELLOW = "\033[33m" 
+DARK_BLUE = "\033[34m"
+DARK_MAGENTA = "\033[35m"
+DARK_CYAN = "\033[36m"
 
 class Facultad:
   
@@ -23,10 +32,12 @@ class Facultad:
   puerto_escuchar_programas:str
   puerto_escuchar_autenticaciones:str
   context:zmq.Context
+  context_autenticacion:zmq.Context
   socket_servidor:zmq.Socket
   socket_programas:zmq.Socket
   socket_programas_autenticacion:zmq.Socket
   socket_health_checker:zmq.Socket
+  fernet:Fernet
 
 # Metodos de la clase
 
@@ -45,6 +56,7 @@ class Facultad:
     self.puerto_escuchar_programas = ""
     self.puerto_escuchar_autenticaciones = ""
     self.context = None
+    self.context_autenticacion = None
     self.socket_servidor = None
     self.socket_programas = None
     self.socket_health_checker = None
@@ -68,23 +80,40 @@ class Facultad:
 
     print("Informacion de la facultad:\n")
     print(self)
+
+    self.leer_clave()
   
+  def leer_clave(self):
+    with open("clave.key", "rb") as archivo:
+      clave = archivo.read()
+    self.fernet = Fernet(clave)
+
   def autenticar_usuarios(self):
-    while(True):
-      try:
+    print("Escuchando peticiones de autenticacion.")
+    try:
+      while(True):
         # Esperar peticion en el puerto
-        peticion:dict = self.socket_programas_autenticacion.recv_json() # Recibe la peticion de autenticacion de algun programa academico
+        print(f"{DARK_CYAN}Recibiendo peticion en el puerto: {self.puerto_escuchar_autenticaciones}...{RESET}")
+        respuesta_cifrada = self.socket_programas_autenticacion.recv() # Recibe la peticion de autenticacion de algun programa academico
+        print(f"{DARK_MAGENTA}Peticion encriptada: {respuesta_cifrada}{RESET}")
+        peticion:dict = json.loads(self.fernet.decrypt(respuesta_cifrada).decode())
+        print(f"{DARK_GREEN}Peticion desencriptada.\n{RESET}")
+        print(f"{DARK_YELLOW}Peticion: {peticion}{RESET}")
         usuario:str = peticion.get("usuario",0)
         contrasena:str = peticion.get("contrasena",0)
 
         es_usuario_valido:bool = self.verificar_credenciales(nombre_usuario=usuario,contraseña=contrasena)
-
+        
         if es_usuario_valido:
-          self.socket_programas_autenticacion.send_string("y") # Responde al programa si el usuario es valido con (y,n) si o no
+          texto_encriptado = self.fernet.encrypt("y".encode())
+          print(f"{DARK_BLUE}Respuesta encriptada: {texto_encriptado}{RESET}")
+          self.socket_programas_autenticacion.send(texto_encriptado) # Responde al programa si el usuario es valido con (y,n) si o no
           continue
-        self.socket_programas_autenticacion.send_string("n")
-      except Exception as e:
-          print(f"{RED}Error al procesar a un usuario {e}{RESET}")
+        texto_encriptado = self.fernet.encrypt("n".encode())
+        print(f"{DARK_BLUE}Respuesta encriptada: {texto_encriptado}{RESET}")
+        self.socket_programas_autenticacion.send(texto_encriptado)
+    except Exception as e:
+        print(f"{RED}Error al procesar a un usuario:  {e}{RESET}")
 
   def verificar_credenciales(self, nombre_usuario:str, contraseña:str, archivo:str='usuarios.txt') -> bool:
     try:
@@ -105,7 +134,7 @@ class Facultad:
         return False
 
   def crear_comunicacion_autenticacion(self):
-    self.socket_programas_autenticacion = self.context.socket(zmq.REP) # Socket sincrono. 
+    self.socket_programas_autenticacion = self.context_autenticacion.socket(zmq.REP) # Socket sincrono. 
     self.socket_programas_autenticacion.bind(f"tcp://*:{self.puerto_escuchar_autenticaciones}")
 
 
@@ -159,6 +188,7 @@ class Facultad:
   def crear_comunicacion(self) -> None:
     # Se crea el context(clase para manejar instancias de los diferentes sockets)
     self.context = zmq.Context()
+    self.context_autenticacion = zmq.Context()
     
     # Se inicializa el canal para la comunicacion con programas
     self.socket_programas = self.context.socket(zmq.REP) # Socket sincrono. 
@@ -170,12 +200,12 @@ class Facultad:
 
     # Se inicializa el canal para autenticar usuarios
     self.crear_comunicacion_autenticacion()
+    hilo_autenticacion = threading.Thread(target=self.autenticar_usuarios) # Hilo para las autenticaciones
+    hilo_autenticacion.start()
 
     # Se crea un canal y se inicializa en el ip y puerto que se ingresan por comando
     self.socket_servidor = self.context.socket(zmq.DEALER)
     self.socket_servidor.connect(f"tcp://{self.ip_puerto_servidor}")
-    hilo_autenticacion = threading.Thread(target=facultad.autenticar_usuarios) # Hilo para las autenticaciones
-    hilo_autenticacion.start()
 
   def actualizar_servidor(self):
     self.socket_health_checker.send_json({"estadoServidor":True})
@@ -186,10 +216,15 @@ class Facultad:
 
   def recibir_peticion(self) -> dict:
     print(f"{CYAN}Recibiendo peticion en el puerto: {self.puerto_escuchar_programas}...{RESET}")
-    peticion:dict = self.socket_programas.recv_json() # Recibe la peticion de algun programa academico
+    respuesta_cifrada = self.socket_programas.recv() 
+    print(f"{MAGENTA}Respuesta encriptada: {respuesta_cifrada}{RESET}")
+    peticion:dict = json.loads(self.fernet.decrypt(respuesta_cifrada).decode())
     print(f"{GREEN}Peticion recibida.\n{RESET}")
     print(f"{YELLOW}Peticion: {peticion}{RESET}")
-    self.socket_programas.send_string("y") # Responde al programa academico con (y,n) si o no
+
+    texto_encriptado = self.fernet.encrypt("y".encode()) # Responde al programa academico con (y,n) si o no
+    print(f"{BLUE}Respuesta encriptada: {texto_encriptado}{RESET}")
+    self.socket_programas.send(texto_encriptado)
     self.guardar_peticion_archivo(peticion)
     peticion["nombreFacultad"] = self.nombre
     return peticion
@@ -218,7 +253,9 @@ class Facultad:
     self.socket_programas.close()
     self.socket_servidor.close()
     self.socket_health_checker.close()
+    self.socket_programas_autenticacion.close()
     self.context.term()
+    self.context_autenticacion.term()
 
 # Seccion main del programa
 

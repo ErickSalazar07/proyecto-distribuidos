@@ -1,6 +1,9 @@
 from datetime import datetime,date
 import zmq
 import sys
+from cryptography.fernet import Fernet
+import json
+
 
 class ProgramaAcademico:
 
@@ -19,6 +22,7 @@ class ProgramaAcademico:
   context_autenticacion:zmq.Context # Sockets para la autenticacion
   socket_facultad:zmq.Socket # Socket para comunicarse con las facultades.
   socket_facultad_autenticacion:zmq.Socket # Socket para comunicarse con la autenticacion de las facultades.
+  fernet:Fernet #Encriptador
 
 # Metodos de la clase
 
@@ -60,6 +64,13 @@ class ProgramaAcademico:
     
     print("Informacion del programa academico.\n\n")
     print(self)
+
+    self.leer_clave()
+  
+  def leer_clave(self):
+    with open("clave.key", "rb") as archivo:
+      clave = archivo.read()
+    self.fernet = Fernet(clave)
 
   def autenticar_usuario(self):
     while(True):
@@ -106,16 +117,35 @@ class ProgramaAcademico:
     self.socket_facultad_autenticacion.connect(f"tcp://{self.ip_puerto_facultad_autenticacion}") # tcp://direccion_facultad:5566
 
   def enviar_info_programa_a_facultad(self) -> None:
-    print("Enviando informacion del programa en formato JSON...")
-    self.socket_facultad.send_json(self.transformar_info_diccionario())
-    print("Informacion enviada.")
-    respuesta:str = self.socket_facultad.recv_string();
-    print("Respuesta: %s\n"%respuesta)
+    print("Construyendo informacion en formato JSON...")
+    mensaje_json = json.dumps(self.transformar_info_diccionario()).encode()
+    print("Encriptando informacion...")
+    mensaje_cifrado = self.fernet.encrypt(mensaje_json)
+    print(f"Mensaje encriptado: {mensaje_cifrado}")
+    print("Enviando informacion encriptada...")
+    self.socket_facultad.send(mensaje_cifrado)
+    print("informacion enviada.")
+
+    respuesta_cifrada = self.socket_facultad.recv() 
+    print(f"Respuesta encriptada: {respuesta_cifrada}")
+    respuesta_descifrada:str = self.fernet.decrypt(respuesta_cifrada).decode()
+    print("Respuesta: %s\n"%respuesta_descifrada)
 
   def enviar_autenticacion_del_usuario_a_facultad(self) -> bool:
-    self.socket_facultad_autenticacion.send_json(self.transformar_autenticacion_en_diccionario())
-    respuesta:str = self.socket_facultad_autenticacion.recv_string() # La facultad responde si el usuario existe o no
-    if respuesta == "y":
+    
+    print("Construyendo usuario en formato JSON...")
+    mensaje_json = json.dumps(self.transformar_autenticacion_en_diccionario()).encode()
+    print("Encriptando usuario...")
+    mensaje_cifrado = self.fernet.encrypt(mensaje_json)
+    print(f"Mensaje encriptado: {mensaje_cifrado}")
+    print("Enviando usuario encriptado...")
+    self.socket_facultad_autenticacion.send(mensaje_cifrado)
+    print("usuario enviado.")
+    respuesta_cifrada = self.socket_facultad_autenticacion.recv() # La facultad responde si el usuario existe o no
+    print(f"Respuesta encriptada: {respuesta_cifrada}")
+    respuesta_descifrada:str = self.fernet.decrypt(respuesta_cifrada).decode()
+    print("Respuesta: %s\n"%respuesta_descifrada)
+    if respuesta_descifrada == "y":
       return True
     return False
 

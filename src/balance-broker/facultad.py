@@ -17,8 +17,7 @@ class Facultad:
 
   nombre:str
   semestre:date
-  ip_puerto_servidor:str
-  ip_puerto_health_checker:str
+  ip_puerto_broker:str
   puerto_escuchar_programas:str
   context:zmq.Context
   socket_broker:zmq.Socket
@@ -36,7 +35,7 @@ class Facultad:
 
     self.nombre = ""
     self.semestre = None
-    self.ip_puerto_servidor = ""
+    self.ip_puerto_broker = ""
     #self.ip_puerto_health_checker = "10.43.96.80:5553"
     self.ip_puerto_health_checker = "localhost:5553"
     self.puerto_escuchar_programas = ""
@@ -51,7 +50,7 @@ class Facultad:
       elif sys.argv[i] == "-s":
         self.semestre = datetime.strptime(sys.argv[i+1],"%m-%Y").date()
       elif sys.argv[i] == "-ip-p-s":
-        self.ip_puerto_servidor = sys.argv[i+1]
+        self.ip_puerto_broker = sys.argv[i+1]
       elif sys.argv[i] == "-puerto-escuchar":
         self.puerto_escuchar_programas = sys.argv[i+1]
 
@@ -74,21 +73,7 @@ class Facultad:
     except Exception as e:
       print(f"Error al guardar la petición: {e}")
 
-  def actualizar_servidor_activo(self,estado): #CREO QUE ESTO IRIA EN EL BROCKER MAS QUE EN EL CLIENTE PREGUNTAR A LAS 8
-    ip_puerto = estado["ipPuerto"]
-    if hasattr(self,"ip_puerto_servidor") and self.ip_puerto_servidor == ip_puerto:
-      return
-
-    try:
-      if hasattr(self,"socket_servidor"):
-        self.socket_servidor.close()
-      
-      self.socket_servidor = self.context.socket(zmq.DEALER)
-      self.socket_servidor.connect(f"tcp://{ip_puerto}")
-      self.ip_puerto_servidor = ip_puerto
-      print(f"{GREEN}✅ Conectado al servidor {estado['servidor_activo']} ({ip_puerto}){RESET}")
-    except Exception as e:
-      print(f"{RED}Error al conectar al servidor {ip_puerto}: {e}{RESET}")
+  
 
   def error_args(self):
     print(f"Debe ingresar las banderas/opciones y sus argumentos correspondientes.\n")
@@ -128,18 +113,6 @@ class Facultad:
 
     # Inicia hilo para escuchar actualizaciones
 
-  def iniciar_escucha_health_checker(self):
-    import threading
-    def escuchar_actualizaciones():
-      while True:
-        try:
-          estado = self.socket_health_checker.recv_json()
-          print(f"{CYAN}Actualizacion recibida del health_checker: {estado}{RESET}")
-          self.actualizar_servidor_activo(estado)
-        except Exception as e:
-          print(f"{RED}Error al recibir actualizacion: {e}{RESET}")
-    threading.Thread(target=escuchar_actualizaciones,daemon=True).start()
-
   def recibir_peticion(self) -> dict:
     print(f"{CYAN}Recibiendo peticion en el puerto: {self.puerto_escuchar_programas}...{RESET}")
     peticion:dict = self.socket_programas.recv_json() # Recibe la peticion de algun programa academico
@@ -150,6 +123,7 @@ class Facultad:
     peticion["nombreFacultad"] = self.nombre
     return peticion
 
+  # aca esta la peticion del broker ESTO NO SE CAMBIAAA DE ACAAAAAAAAAAAAA
   def enviar_peticion_broker(self, peticion_enviar: dict) -> bool:
     if not hasattr(self, 'socket_broker') or self.socket_broker.closed:
         print(f"{RED}Error: No hay conexión activa con el broker{RESET}")
@@ -173,11 +147,11 @@ class Facultad:
     print("Escuchando peticiones de los programas academicos.")
     while True:
       peticion_programa = self.recibir_peticion()
-      self.enviar_peticion_servidor(peticion_programa)
+      self.enviar_peticion_broker(peticion_programa)
 
   def cerrar_comunicacion(self) -> None:
     self.socket_programas.close()
-    self.socket_servidor.close()
+    self.socket_broker.close()
     self.socket_health_checker.close()
     self.context.term()
 

@@ -225,8 +225,10 @@ def traer_archivo_central():
 def main():
     # REQ socket hacia el Health Checker
     ctx_hc = zmq.Context()
-    req_hc = ctx_hc.socket(zmq.REQ)
-    req_hc.connect(HEALTH_CHECKER_ADDR)
+    sub = ctx.socket(zmq.SUB)
+    sub.connect(HEALTH_ADDR)
+    sub.setsockopt_string(zmq.SUBSCRIBE, "Estado")  # recibe todo
+
 
     server_thread = None
     stop_event = threading.Event()
@@ -234,8 +236,7 @@ def main():
     print("[Respaldo] Comenzando ciclo de espera de arranque...")
     while True:
         # 1) Preguntamos al Health Checker
-        req_hc.send_string("¿Puedo arrancar?")
-        respuesta = req_hc.recv_string()
+        respuesta = sub.recv_string()
         print(f"[Respaldo] HealthChecker respondió: {respuesta}")
 
         if respuesta == "START":

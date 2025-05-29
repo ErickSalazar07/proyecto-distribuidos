@@ -1,3 +1,257 @@
+import zmq
+import sys
+import time
+import threading
+import json
+
+# Colores para visualizar mejor la salida estandar.
+RED = "\033[91m"
+GREEN = "\033[92m"
+YELLOW = "\033[93m"
+BLUE = "\033[94m"
+MAGENTA = "\033[95m"
+CYAN = "\033[96m"
+RESET = "\033[0m"
+
+CANT_WORKERS = 10
+
+class ServidorCentral:
+
+  num_salones:int
+  num_laboratorios:int
+  solicitudes_fallidas:list
+  peticiones:list
+  context:zmq.Context
+  context_workers:zmq.Context
+  socket_broker:zmq.Socket
+  socket_health_checker:zmq.Socket
+  ip_puerto_health_checker:str
+  hilo_health:threading.Thread
+  url_worker:str
+  workers:list
+
+  def __init__(self):
+
+    self.db = None
+    self.num_salones = 380
+    self.num_laboratorios = 60
+    self.solicitudes_fallidas = list()
+    self.context = None
+    self.context_workers = None
+    self.socket_broker = None
+    self.socket_health_checker = None
+    self.hilo_health = None
+    self.ip_puerto_health_checker = "localhost:5550"
+    self.url_worker = "tcp://localhost:5555"
+    self.workers = []
+    # self.ip_puerto_health_checker = "10.43.96.80:5550"
+    
+    self.cargar_db("db.txt")
+    print("Informacion del servidor.\n\n")
+    print(self)
+    self.db = open("db.txt","+w")
+    
+
+  def cargar_db(self,nombre_db:str):
+    try:
+      with open(nombre_db,"r") as db:
+        for linea in db:
+          if linea.startswith("Salones:"):
+            self.num_salones = int(linea.split(":")[1].strip())
+          elif linea.startswith("Laboratorios:"):
+            self.num_laboratorios = int(linea.split(":")[1].strip())
+          else:
+            if linea.strip():
+              try:
+                partes = [p.strip() for p in linea.split(",")]
+                peticion = {
+                  "nombreFacultad": partes[0].split(":")[1].strip(),
+                  "nombrePrograma": partes[1].split(":")[1].strip(),
+                  "numSalones": int(partes[2].split(":")[1].strip()),
+                  "numLaboratorios": int(partes[3].split(":")[1].strip())
+                }
+                self.peticiones.append(peticion)
+              except Exception as e:
+                print(f"{YELLOW}Advertencia: No se puedo leer un registro: {e}{RESET}")
+
+        db.close()
+    except Exception as e:
+      print(f"{RED}Hubo un error leyendo el archivo: Error: {e}{RESET}")
+
+  def __str__(self) -> str:
+    return\
+    f"Numero salones: {self.num_salones}\n"\
+    f"Numero laboratorios: {self.num_laboratorios}\n\n"
+
+  def crear_comunicacion(self) -> None:
+    self.context = zmq.Context()
+    self.context_workers = zmq.Context()
+    
+    # Comunicacion con health checker
+    self.socket_health_checker = self.context.socket(zmq.PUSH)
+    self.socket_health_checker.connect(f"tcp://{self.ip_puerto_health_checker}")
+
+    # Crear hilo para comunicacion con health checker
+    self.hilo_health = threading.Thread(target=self.comunicar_estado_health_checker, daemon=True)
+    self.hilo_health.start()
+  
+  def crear_workers(self):
+    for i in range(CANT_WORKERS):
+        thread = threading.Thread(target=self.laburo,
+                                  args=(self.url_worker, self.context_workers, i, ))
+        thread.start()
+        self.workers.append(thread)
+
+  def laburo(self, worker_url, context, i):
+    socket_worker:zmq.Socket = None
+    """ Worker using REQ socket to do LRU routing """
+    socket_worker = context.socket(zmq.REQ)
+
+    # set worker identity
+    socket_worker.identity = (u"Worker-%d" % (i)).encode('ascii')
+    socket_worker.connect(worker_url)
+
+    # Tell the broker we are ready for work
+    socket_worker.send(b"READY")
+    try:
+      while True:
+        address, empty, request_bytes = socket_worker.recv_multipart()
+        request:dict = json.loads(request_bytes)
+        print("%s: %s\n" % (socket_worker.identity.decode('ascii'),
+                            request), end='')
+        if isinstance(request, dict) and 'nombreFacultad' in request and 'nombrePrograma' in request:
+          print(f"{YELLOW}Petición de {request['nombreFacultad']} - Programa {request['nombrePrograma']}{RESET}")
+        else:
+          print(f"{RED}Petición recibida malformada o incompleta: {request}{RESET}")
+          continue  
+        print(f"{MAGENTA}Contenido: {request}{RESET}")
+
+        reserva_exitosa:bool = self.reservar_peticion(request)
+        respuesta = {
+          "respuesta": "y" if reserva_exitosa else "n",
+          "salonesDisponibles": self.num_salones,
+          "laboratoriosDisponibles": self.num_laboratorios
+        }
+        respuesta_codificada = json.dumps(respuesta).encode('utf-8')
+        socket_worker.send_multipart([address, b'', respuesta_codificada])
+
+        if reserva_exitosa:
+          # Esperar confirmación de aceptación de la facultad
+          _, raw_confirmacion = socket_worker.recv_multipart()
+          confirmacion = zmq.utils.jsonapi.loads(raw_confirmacion)
+          if confirmacion.get("confirmacion") == True:
+            print(f"{GREEN}La facultad confirmó la reserva.{RESET}")
+            self.guardar_peticion_db(request)
+            self.peticiones.append(request)
+          else:
+            print(f"{RED}El broker rechazó la reserva.{RESET}") # Devolvemos recursos asignados
+            self.num_salones += request.get("numSalones",0)
+            self.num_laboratorios += request.get("numLaboratorios",0)
+
+    except Exception as e:
+      print(f"{RED}[Worker id:{i}] Error al trabajar: {e}{RESET}")
+
+  def comunicar_estado_health_checker(self):
+    while True:
+      mensaje = {"estado": "ok"}
+
+      try:
+        self.socket_health_checker.send_json(mensaje)
+        print(f"{BLUE}[Health Check] Estado enviado al health_checker.{RESET}")
+      except Exception as e:
+        print(f"{RED}[Health Check] Error al enviar estado: {e}{RESET}")
+      time.sleep(2) # Espera 2 segundo a enviar el siguiente ping o estado
+
+  def reservar_peticion(self,peticion:dict) -> dict:
+    num_salones = peticion.get("numSalones",0)
+    num_laboratorios = peticion.get("numLaboratorios",0)
+
+    if self.num_salones >= num_salones and self.num_laboratorios >= num_laboratorios:
+      self.num_salones -= num_salones
+      self.num_laboratorios -= num_laboratorios
+      return {"estatus": True, "laboratoriosDisponibles": True}
+    elif self.num_salones >= num_salones:
+      self.num_salones -= num_salones
+      return {"estatus": True, "laboratoriosDisponibles": False}
+
+    self.solicitudes_fallidas.append(peticion)
+    print(f"{RED}Solicitud no atendida guardada en lista de peticiones fallidas.{RESET}")
+    return {"estatus": False, "laboratoriosDisponibles": False}
+
+  def cerrar_comunicacion(self) -> None:
+    self.socket_broker.close()
+    self.socket_health_checker.close()
+    self.context.term()
+
+  def guardar_peticion_db(self,peticion):
+    peticion_txt = f"Nombre Facultad: {peticion['nombreFacultad']}, Nombre Programa: {peticion['nombrePrograma']}," \
+      + f"Num Salones: {peticion['numSalones']}, Num Laboratorios: {peticion['numLaboratorios']}\n"
+    self.db.write(peticion_txt)
+
+  def cerrar_db(self):
+    for peticion in self.peticiones:
+      peticion_txt = f"Nombre Facultad: {peticion['nombreFacultad']}, Nombre Programa: {peticion['nombrePrograma']},"\
+      + f"Num Salones: {peticion['numSalones']}, Num Laboratorios: {peticion['numLaboratorios']}\n"
+      self.db.write(peticion_txt)
+
+    self.db.write(f"Salones: {self.num_salones}\n")
+    self.db.write(f"Laboratorios: {self.num_laboratorios}\n")
+    self.db.close()
+
+def iniciarServidor():
+  servidor_central = ServidorCentral()
+  servidor_central.crear_comunicacion()
+  try:
+    servidor_central.crear_workers()
+    for worker in servidor_central.workers:
+      worker.join()
+  except KeyboardInterrupt:
+    print(f"\n{RED}Servidor detenido manualmente.{RESET}")
+    print(f"{YELLOW}Solicitudes fallidas almacenadas:{RESET}")
+    for idx, solicitud in enumerate(servidor_central.solicitudes_fallidas, 1):
+      print(f"{idx}. {solicitud}")
+  finally:
+    servidor_central.cerrar_comunicacion()
+    servidor_central.cerrar_db()
+
+
+def main():
+    # REQ socket hacia el Health Checker
+    ctx_hc = zmq.Context()
+    req_hc = ctx_hc.socket(zmq.REQ)
+    req_hc.connect(HEALTH_CHECKER_ADDR)
+
+    broker_thread = None
+    stop_event = threading.Event()
+
+    print("[Respaldo] Comenzando ciclo de espera de arranque...")
+    while True:
+        # 1) Preguntamos al Health Checker
+        req_hc.send_string("¿Puedo arrancar?")
+        respuesta = req_hc.recv_string()
+        print(f"[Respaldo] HealthChecker respondió: {respuesta}")
+
+        if respuesta == "START":
+            # Si no está corriendo, arrancamos el broker
+            if broker_thread is None or not broker_thread.is_alive():
+                print("[Respaldo] Autorizado: iniciando broker de respaldo...")
+                stop_event.clear()
+                broker_thread = threading.Thread(
+                    target=run_broker,
+                    args=(stop_event,),
+                    daemon=True
+                )
+                broker_thread.start()
+        else:  # respuesta == "WAIT"
+            # Si el broker está corriendo, lo detenemos
+            if broker_thread is not None and broker_thread.is_alive():
+                print("[Respaldo] Indicaron WAIT: deteniendo broker de respaldo...")
+                stop_event.set()
+                broker_thread.join()
+                broker_thread = None
+
+        # Esperamos antes de volver a preguntar
+        time.sleep(1)
 
 if __name__ == "__main__":
-  print("Servidor respaldo...")
+    main()

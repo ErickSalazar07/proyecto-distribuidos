@@ -40,8 +40,8 @@ class HealthChecker:
     self.socket_servidor_principal = self.context.socket(zmq.PULL)
     self.socket_servidor_principal.bind("tcp://*:5550")
 
-    # Socket para publicar estado broker (REP)
-    self.socket_broker = self.context.socket(zmq.REP)
+    # Socket para publicar estado broker (PUB)
+    self.socket_broker = self.context.socket(zmq.PUB)
     self.socket_broker.bind(f"tcp://*:{self.puerto_publicaciones}")
 
 
@@ -49,7 +49,13 @@ class HealthChecker:
     self.socket_arranque.bind("tcp://*:5516")
 
   def comunicar_estado(self):
+    servidor_en_local:str = "principal"
     while True:
+      if servidor_en_local == self.servidor_activo:
+        continue
+      self.socket_broker.send_string(f"{self.servidor_activo}")
+      servidor_en_local = self.servidor_activo
+      '''
       pregunta_facultades = self.socket_broker.recv_json()
     
       if pregunta_facultades.get("estadoServidor") == True:
@@ -61,6 +67,7 @@ class HealthChecker:
         print(f"📢 Publicando estado: {estado}")
       else:
         print(f"Peticion de facultad mal formada")
+        '''
 
   def escuchar_ping_servidor_central(self):
     print("🩺 Health checker escuchando pings del servidor central o auxiliar...\n")

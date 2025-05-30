@@ -16,7 +16,7 @@ RESET = "\033[0m"
 class Broker:
     available_workers:int
     workers_list:list
-    context_cambio:zmq.Context
+
 
     def __init__(self):
         print("init")
@@ -25,6 +25,7 @@ class Broker:
         # Puerto en el que el broker recibirá peticiones de las Facultades
         # (debe coincidir con lo que ellas usan en "-ip-p-s")
         self.puerto_escuchar_facultad = "5513"
+        self.puerto_escuchar_workers = "5555"
 
         # Contexto y sockets de ZeroMQ
         self.context = None
@@ -39,12 +40,10 @@ class Broker:
         self.available_workers = 0
         self.workers_list = []
 
-
     def crear_comunicacion(self) -> None:
         """Inicializa el contexto, el ROUTER (frontend), el SUB (health)
            y arranca el hilo que escucha actualizaciones del Health Checker."""
         self.context = zmq.Context()
-        self.context_cambio = zmq.Context()
 
         # 1) FRONTEND: ROUTER para recibir de las Facultades
         self.frontend = self.context.socket(zmq.ROUTER)
@@ -52,15 +51,16 @@ class Broker:
         self.frontend.bind(f"tcp://*:{self.puerto_escuchar_facultad}")
         print(f"{GREEN}Broker: frontend ROUTER escuchando en tcp://*:{self.puerto_escuchar_facultad}{RESET}")
 
-        # 2) BACKEND: DEALER para reenviar a los Servidores (inicialmente no conectado)
-        #    Esperaremos a que llegue el primer estado del Health Checker para conectar.
+        # 2) BACKEND: ROUTER para recivir a los workers
         self.backend = self.context.socket(zmq.ROUTER)
-        # (No hacemos bind ni connect aquí; se hará en actualizar_servidor_activo())
+        self.backend.bind(f"tcp://*:{self.puerto_escuchar_workers}")
+        print(f"{GREEN}Broker: backend ROUTER escuchando en tcp://*:{self.puerto_escuchar_workers}{RESET}")
 
         # 3) HEALTH_CHECKER: SUB para recibir actualizaciones de qué servidor está activo
-        self.socket_health_checker = self.context.socket(zmq.REQ)
+        self.socket_health_checker = self.context.socket(zmq.SUB)
         self.socket_health_checker.connect(f"tcp://{self.ip_puerto_health_checker}")
-        print(f"{GREEN}Broker: REQ conectado a Health Checker en tcp://{self.ip_puerto_health_checker}{RESET}")
+        self.socket_health_checker.setsockopt_string(zmq.SUBSCRIBE, "")
+        print(f"{GREEN}Broker: SUB conectado a Health Checker en tcp://{self.ip_puerto_health_checker}{RESET}")
 
         # 4) Arrancamos hilo para procesar mensajes del Health Checker
         thread = threading.Thread(target=self._escuchar_health_checker, daemon=True)
@@ -71,13 +71,20 @@ class Broker:
         """Función que corre en un hilo daemon. Se queda bloqueado recibiendo
            mensajes JSON del Health Checker y llama a actualizar_servidor_activo()."""
         while True:
+            self.socket_health_checker.recv_string()
+            print("Me dijeron que cambio el servidor")
+
+            self.workers_list = []
+            self.available_workers = 0
+
+            '''
             try:
                 self.socket_health_checker.send_json({"estadoServidor":True})
                 estado = self.socket_health_checker.recv_json()
                 # Ejemplo de estado recibido:
                 #   { "servidorActivo": "principal", "ipPuerto": "localhost:5560" }
                 print(f"{CYAN}Broker: mensaje Health Checker → {estado}{RESET}")
-                self.actualizar_servidor_activo(estado)
+                servidor_Activo = self.actualizar_servidor_activo(estado, servidor_actual=servidor_Activo)
                 time.sleep(1) # Esperar 1 segundos
             except zmq.ZMQError as e:
                 print(f"{RED}Broker: ZMQError al leer Health Checker: {e}{RESET}")
@@ -85,9 +92,19 @@ class Broker:
             except Exception as e:
                 print(f"{RED}Broker: Error inesperado en hilo Health Checker: {e}{RESET}")
                 break
+                '''
+    '''
+    def actualizar_servidor_activo(self, estado: dict, servidor_actual) -> str:
+
+        if(servidor_actual == estado.get("servidorActivo")): # Si el servidor activo del broker es igual al del healthcheker
+            return # No cambia nada
+        # En caso de haber un cambio en el servidor activo 
+        self.workers_list = []
+        self.available_workers = 0
+        servidor_actual = estado.get("servidorActivo")
 
 
-    def actualizar_servidor_activo(self, estado: dict) -> None:
+
         ip_puerto = estado.get("ipPuerto")
         if not ip_puerto or ip_puerto == self.current_backend_ip:
             return
@@ -109,7 +126,7 @@ class Broker:
         self.current_backend_ip = ip_puerto
 
         print(f"{YELLOW}Broker: conectado (backend ROUTER) a → tcp://{ip_puerto}{RESET}")
-
+        '''
 
     def start(self) -> None:
         poller = zmq.Poller()

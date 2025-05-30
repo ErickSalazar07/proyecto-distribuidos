@@ -35,7 +35,7 @@ class ServidorCentral:
     self.solicitudes_fallidas = list()
     self.context = None
     self.context_workers = None
-    self.url_worker = "tcp://localhost:5572"
+    self.url_worker = "tcp://localhost:5555"
     self.workers = []
     # self.ip_puerto_health_checker = "10.43.96.80:5550"
     
@@ -181,6 +181,7 @@ class ServidorCentral:
 def run_server(stop_event: threading.Event):
   servidor_central = ServidorCentral()
   servidor_central.crear_comunicacion()
+  time.sleep(2) # Esperar 2 segundos
   servidor_central.crear_workers(stop_event)
   print("[server-Respaldo] Iniciado ")
   try:

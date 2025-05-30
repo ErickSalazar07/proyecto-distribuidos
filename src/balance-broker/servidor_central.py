@@ -244,6 +244,7 @@ if __name__ == "__main__":
     servidor_central.crear_comunicacion()
 
     try:
+        time.sleep(2) # Esperar 2 segundos
         servidor_central.crear_workers()
         for worker in servidor_central.workers:
             worker.join()

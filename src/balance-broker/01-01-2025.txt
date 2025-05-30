@@ -15,3 +15,7 @@ Programa Academico: Sistemas, Salones: 8, Laboratorios: 3
 Programa Academico: Sistemas, Salones: 8, Laboratorios: 3
 Programa Academico: Sistemas, Salones: 8, Laboratorios: 3
 Programa Academico: Sistemas, Salones: 4, Laboratorios: 2
+Programa Academico: Sistemas, Salones: 4, Laboratorios: 3
+Programa Academico: Sistemas, Salones: 5, Laboratorios: 3
+Programa Academico: OtraCarrera, Salones: 5, Laboratorios: 3
+Programa Academico: Nose, Salones: 5, Laboratorios: 3

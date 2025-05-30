@@ -24,7 +24,6 @@ class ServidorCentral:
   peticiones:list
   context:zmq.Context
   context_workers:zmq.Context
-  socket_broker:zmq.Socket
   url_worker:str
   workers:list
 
@@ -36,7 +35,6 @@ class ServidorCentral:
     self.solicitudes_fallidas = list()
     self.context = None
     self.context_workers = None
-    self.socket_broker = None
     self.url_worker = "tcp://localhost:5572"
     self.workers = []
     # self.ip_puerto_health_checker = "10.43.96.80:5550"
@@ -83,14 +81,16 @@ class ServidorCentral:
     self.context_workers = zmq.Context()
 
   
-  def crear_workers(self):
+  def crear_workers(self, stop_event):
     for i in range(CANT_WORKERS):
-        thread = threading.Thread(target=self.laburo,
-                                  args=(self.url_worker, self.context_workers, i, ))
+        thread = threading.Thread(
+            target=self.laburo,
+            args=(self.url_worker, self.context_workers, i, stop_event)
+        )
         thread.start()
         self.workers.append(thread)
 
-  def laburo(self, worker_url, context, i):
+  def laburo(self, worker_url, context, i,stop_event):
     socket_worker:zmq.Socket = None
     """ Worker using REQ socket to do LRU routing """
     socket_worker = context.socket(zmq.REQ)
@@ -101,43 +101,48 @@ class ServidorCentral:
 
     # Tell the broker we are ready for work
     socket_worker.send(b"READY")
-    try:
-      while True:
-        address, empty, request_bytes = socket_worker.recv_multipart()
-        request:dict = json.loads(request_bytes)
-        print("%s: %s\n" % (socket_worker.identity.decode('ascii'),
-                            request), end='')
-        if isinstance(request, dict) and 'nombreFacultad' in request and 'nombrePrograma' in request:
-          print(f"{YELLOW}Petición de {request['nombreFacultad']} - Programa {request['nombrePrograma']}{RESET}")
-        else:
-          print(f"{RED}Petición recibida malformada o incompleta: {request}{RESET}")
-          continue  
-        print(f"{MAGENTA}Contenido: {request}{RESET}")
 
-        reserva_exitosa:bool = self.reservar_peticion(request)
-        respuesta = {
-          "respuesta": "y" if reserva_exitosa else "n",
-          "salonesDisponibles": self.num_salones,
-          "laboratoriosDisponibles": self.num_laboratorios
-        }
-        respuesta_codificada = json.dumps(respuesta).encode('utf-8')
-        socket_worker.send_multipart([address, b'', respuesta_codificada])
+    while not stop_event.is_set():
+      try:
+          while True:
+            address, empty, request_bytes = socket_worker.recv_multipart()
+            request:dict = json.loads(request_bytes)
+            print("%s: %s\n" % (socket_worker.identity.decode('ascii'),
+                                request), end='')
+            if isinstance(request, dict) and 'nombreFacultad' in request and 'nombrePrograma' in request:
+              print(f"{YELLOW}Petición de {request['nombreFacultad']} - Programa {request['nombrePrograma']}{RESET}")
+            else:
+              print(f"{RED}Petición recibida malformada o incompleta: {request}{RESET}")
+              continue  
+            print(f"{MAGENTA}Contenido: {request}{RESET}")
 
-        if reserva_exitosa:
-          # Esperar confirmación de aceptación de la facultad
-          _, raw_confirmacion = socket_worker.recv_multipart()
-          confirmacion = zmq.utils.jsonapi.loads(raw_confirmacion)
-          if confirmacion.get("confirmacion") == True:
-            print(f"{GREEN}La facultad confirmó la reserva.{RESET}")
-            self.guardar_peticion_db(request)
-            self.peticiones.append(request)
-          else:
-            print(f"{RED}El broker rechazó la reserva.{RESET}") # Devolvemos recursos asignados
-            self.num_salones += request.get("numSalones",0)
-            self.num_laboratorios += request.get("numLaboratorios",0)
+            reserva_exitosa:bool = self.reservar_peticion(request)
+            respuesta = {
+              "respuesta": "y" if reserva_exitosa else "n",
+              "salonesDisponibles": self.num_salones,
+              "laboratoriosDisponibles": self.num_laboratorios
+            }
+            respuesta_codificada = json.dumps(respuesta).encode('utf-8')
+            socket_worker.send_multipart([address, b'', respuesta_codificada])
 
-    except Exception as e:
-      print(f"{RED}[Worker id:{i}] Error al trabajar: {e}{RESET}")
+            if reserva_exitosa:
+              # Esperar confirmación de aceptación de la facultad
+              _, raw_confirmacion = socket_worker.recv_multipart()
+              confirmacion = zmq.utils.jsonapi.loads(raw_confirmacion)
+            if confirmacion.get("confirmacion") == True:
+              print(f"{GREEN}La facultad confirmó la reserva.{RESET}")
+              self.guardar_peticion_db(request)
+              self.peticiones.append(request)
+            else:
+              print(f"{RED}El broker rechazó la reserva.{RESET}") # Devolvemos recursos asignados
+              self.num_salones += request.get("numSalones",0)
+              self.num_laboratorios += request.get("numLaboratorios",0)
+      except zmq.Again:
+          time.sleep(0.1)  # Espera activa no bloqueante
+          continue
+
+      except Exception as e:
+        print(f"{RED}[Worker id:{i}] Error al trabajar: {e}{RESET}")
 
   def reservar_peticion(self,peticion:dict) -> dict:
     num_salones = peticion.get("numSalones",0)
@@ -156,7 +161,6 @@ class ServidorCentral:
     return {"estatus": False, "laboratoriosDisponibles": False}
 
   def cerrar_comunicacion(self) -> None:
-    self.socket_broker.close()
     self.context.term()
 
   def guardar_peticion_db(self,peticion):
@@ -177,12 +181,13 @@ class ServidorCentral:
 def run_server(stop_event: threading.Event):
   servidor_central = ServidorCentral()
   servidor_central.crear_comunicacion()
+  servidor_central.crear_workers(stop_event)
   print("[server-Respaldo] Iniciado ")
   try:
     while not stop_event.is_set():
-      servidor_central.crear_workers()
-      for worker in servidor_central.workers:
-        worker.join()
+      
+      time.sleep(1)
+      
   except KeyboardInterrupt:
     print(f"\n{RED}Servidor detenido manualmente.{RESET}")
     print(f"{YELLOW}Solicitudes fallidas almacenadas:{RESET}")
@@ -238,3 +243,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

@@ -88,34 +88,28 @@ class Broker:
 
 
     def actualizar_servidor_activo(self, estado: dict) -> None:
-        """
-        Cada vez que el Health Checker publique un JSON con el servidor activo,
-        reconfiguramos el socket DEALER (backend) para conectarse al IP:PUERTO correcto.
-        """
         ip_puerto = estado.get("ipPuerto")
-        if not ip_puerto:
+        if not ip_puerto or ip_puerto == self.current_backend_ip:
             return
 
-        # Si ya estábamos conectados a esa misma dirección, no hacemos nada
-        if ip_puerto == self.current_backend_ip:
-            return
-
-        # Si había una conexión anterior, la cerramos
+        # Cerramos socket anterior si existía
         if self.current_backend_ip is not None:
             try:
                 self.backend.close()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"Error cerrando backend anterior: {e}")
 
-            # Creamos un socket NUEVO cada vez que cambia el servidor
-            context_cambio = zmq.Context()
-            self.backend = context_cambio.socket(zmq.ROUTER)
-            context_cambio.term()
+            # Limpiar lista de workers
+            self.available_workers = 0
+            self.workers_list.clear()
 
-        # Conectamos el nuevo DEALER al servidor activo
-        self.backend.bind(f"tcp://{ip_puerto}")
+        # 🔧 Aquí el cambio clave
+        self.backend = self.context.socket(zmq.ROUTER)
+        self.backend.connect(f"tcp://{ip_puerto}")
         self.current_backend_ip = ip_puerto
-        print(f"{YELLOW}Broker: conectado (backend DEALER) a → tcp://{ip_puerto}{RESET}")
+
+        print(f"{YELLOW}Broker: conectado (backend ROUTER) a → tcp://{ip_puerto}{RESET}")
+
 
     def start(self) -> None:
         poller = zmq.Poller()

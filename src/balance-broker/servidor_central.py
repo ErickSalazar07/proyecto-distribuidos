@@ -24,7 +24,6 @@ class ServidorCentral:
   context:zmq.Context
   context_workers:zmq.Context
   context_persistencia:zmq.Context
-  socket_broker:zmq.Socket
   socket_health_checker:zmq.Socket
   socket_persistencia:zmq.Socket
   ip_puerto_health_checker:str
@@ -34,8 +33,9 @@ class ServidorCentral:
   url_worker:str
   workers:list
 
-  def __init__(self):
+  def __init__(self,stop_event: threading.Event):
 
+    self.stop_event = stop_event
     self.db = None
     self.num_salones = 0
     self.num_laboratorios = 0
@@ -43,7 +43,6 @@ class ServidorCentral:
     self.context = None
     self.context_workers = None
     self.context_persistencia = None
-    self.socket_broker = None
     self.socket_health_checker = None
     self.socket_persistencia = None
     self.hilo_health = None
@@ -184,15 +183,15 @@ class ServidorCentral:
       print(f"{RED}[Worker id:{i}] Error al trabajar: {e}{RESET}")
 
   def comunicar_estado_health_checker(self):
-    while True:
-      mensaje = {"estado": "ok"}
-
-      try:
-        self.socket_health_checker.send_json(mensaje)
-        print(f"{BLUE}[Health Check] Estado enviado al health_checker.{RESET}")
-      except Exception as e:
-        print(f"{RED}[Health Check] Error al enviar estado: {e}{RESET}")
-      time.sleep(2) # Espera 2 segundo a enviar el siguiente ping o estado
+    while not self.stop_event.is_set():
+        mensaje = {"estado": "ok"}
+        try:
+            self.socket_health_checker.send_json(mensaje)
+            print(f"{BLUE}[Health Check] Estado enviado al health_checker.{RESET}")
+        except zmq.ZMQError as e:
+            print(f"{RED}[Health Check] Error al enviar estado: {e}{RESET}")
+            break  # Detenemos el hilo si el socket fue cerrado
+        time.sleep(2)# Espera 2 segundo a enviar el siguiente ping o estado
 
   def reservar_peticion(self,peticion:dict) -> dict:
     numero_salones = peticion.get("numSalones",0)
@@ -210,9 +209,18 @@ class ServidorCentral:
     return {"estatus": False, "laboratoriosDisponibles": False}
 
   def cerrar_comunicacion(self) -> None:
-    self.socket_broker.close()
-    self.socket_health_checker.close()
-    self.context.term()
+    self.stop_event.set()  # Señal para detener los hilos
+
+    # Esperamos a que el hilo termine (opcional, si no es daemon)
+    if self.hilo_health and self.hilo_health.is_alive():
+        self.hilo_health.join()
+
+    if self.socket_health_checker:
+        self.socket_health_checker.close()
+
+    # No termines el contexto si planeas reiniciar este objeto
+    # self.context.term()
+
 
   def guardar_peticion_db(self,peticion):
     peticion_txt = f"Nombre Facultad: {peticion['nombreFacultad']}, Nombre Programa: {peticion['nombrePrograma']}," \
@@ -230,17 +238,22 @@ class ServidorCentral:
     self.db.close()
 
 if __name__ == "__main__":
-  servidor_central = ServidorCentral()
-  servidor_central.crear_comunicacion()
-  try:
-    servidor_central.crear_workers()
-    for worker in servidor_central.workers:
-      worker.join()
-  except KeyboardInterrupt:
-    print(f"\n{RED}Servidor detenido manualmente.{RESET}")
-    print(f"{YELLOW}Solicitudes fallidas almacenadas:{RESET}")
-    for idx, solicitud in enumerate(servidor_central.solicitudes_fallidas, 1):
-      print(f"{idx}. {solicitud}")
-  finally:
-    servidor_central.cerrar_comunicacion()
-    servidor_central.cerrar_db()
+    stop_event = threading.Event()  # ← Nuevo
+
+    servidor_central = ServidorCentral(stop_event)  # ← Pásalo al constructor
+    servidor_central.crear_comunicacion()
+
+    try:
+        servidor_central.crear_workers()
+        for worker in servidor_central.workers:
+            worker.join()
+    except KeyboardInterrupt:
+        print(f"\n{RED}Servidor detenido manualmente.{RESET}")
+        print(f"{YELLOW}Solicitudes fallidas almacenadas:{RESET}")
+        for idx, solicitud in enumerate(servidor_central.solicitudes_fallidas, 1):
+            print(f"{idx}. {solicitud}")
+        stop_event.set()  # ← Esto hace que el hilo de health checker termine
+    finally:
+        servidor_central.cerrar_comunicacion()
+        servidor_central.cerrar_db()
+

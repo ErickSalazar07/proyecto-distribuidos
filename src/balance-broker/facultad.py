@@ -42,7 +42,7 @@ class Facultad:
     self.socket_broker = None
     self.socket_programas = None
     
-
+    # python3 facultad.py -n facultad -s 05-2025 -ip-p-b 10.43.96.80:5552 -puerto-escuchar 6000
     for i in range(1,len(sys.argv)):
       if sys.argv[i] == "-n":
         self.nombre = sys.argv[i+1]

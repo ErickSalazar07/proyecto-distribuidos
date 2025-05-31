@@ -5,7 +5,7 @@ import random
 import signal
 import sys
 
-def arrancar_facultades(num_facultades, base_port, broker_ip, semestre):
+def arrancar_facultades(num_facultades, base_port, semestre):
     """
     Lanza num_facultades instancias de 'facultad.py', una por cada puerto
     consecutivo a partir de base_port. Devuelve la lista de objetos Popen
@@ -21,7 +21,7 @@ def arrancar_facultades(num_facultades, base_port, broker_ip, semestre):
             "python3", "facultad.py",
             "-n", nombre_fac,
             "-s", semestre,
-            "-ip-p-b", broker_ip,
+            "-ip-p-b", "IGNORADO",           # Ojo: en este ejemplo no se usa
             "-puerto-escuchar", str(puerto)
         ]
         # Arrancamos la facultad en background (silenciamos salida)
@@ -71,7 +71,6 @@ def main():
     # Parámetros generales
     NUM_FACULTADES = 10
     BASE_PORT       = 6000
-    BROKER_IP       = "10.43.96.80:5553"
     SEMESTRE        = "05-2025"
 
     # Solo un escenario: 50 procesos en total → 5 por facultad
@@ -82,7 +81,7 @@ def main():
 
     # 1) Arrancar todas las facultades (puertos 6000..6009)
     facultad_procs, lista_facultades = arrancar_facultades(
-        NUM_FACULTADES, BASE_PORT, BROKER_IP, SEMESTRE
+        NUM_FACULTADES, BASE_PORT, SEMESTRE
     )
 
     # Pequeño delay para asegurarnos de que los servidores de facultades estén escuchando

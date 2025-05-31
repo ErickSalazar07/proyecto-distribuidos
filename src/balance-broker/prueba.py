@@ -39,6 +39,7 @@ def lanzar_programas(num_programas_por_facultad, num_facultades, base_port, seme
       - 'proc': el objeto Popen
       - 'start': timestamp de inicio
       - 'facultad': nombre de la facultad a la que apunta
+      # 'end' se agregará cuando termine cada proceso
     """
     procesos_info = []
     for i in range(num_facultades):
@@ -58,9 +59,9 @@ def lanzar_programas(num_programas_por_facultad, num_facultades, base_port, seme
             start_time = time.time()
             p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             procesos_info.append({
-                "proc": p,
-                "start": start_time,
-                "facultad": nombre_fac
+                "proc":     p,
+                "start":    start_time,
+                "facultad": nombre_fac,
             })
         print(f"   • Facultad '{nombre_fac}' (puerto {puerto_fac}) recibió "
               f"{num_programas_por_facultad} solicitudes.")
@@ -72,10 +73,12 @@ def main():
     BASE_PORT       = 6000
     BROKER_IP       = "10.43.96.80:5553"
     SEMESTRE        = "05-2025"
-    # Escenarios: total de procesos de 'programa_academico.py'
-    ESCENARIOS = [50, 100, 200, 500]
 
-    print("\n=== Orquestador de simulación de solicitudes (versión con métricas) ===\n")
+    # Solo un escenario: 50 procesos en total → 5 por facultad
+    TOTAL_PROGRAMAS = 50
+    PROGS_POR_FAC   = TOTAL_PROGRAMAS // NUM_FACULTADES  # = 5
+
+    print("\n=== Orquestador: escenario único de 50 procesos ===\n")
 
     # 1) Arrancar todas las facultades (puertos 6000..6009)
     facultad_procs, lista_facultades = arrancar_facultades(
@@ -85,78 +88,68 @@ def main():
     # Pequeño delay para asegurarnos de que los servidores de facultades estén escuchando
     time.sleep(2)
 
-    resultados = {}  # para guardar tiempos totales por escenario
+    print(f"\n--- Escenario: {TOTAL_PROGRAMAS} procesos totales "
+          f"({PROGS_POR_FAC} por facultad) ---")
 
-    for total_programas in ESCENARIOS:
-        # Calcular cuántos programas por facultad (entero)
-        progs_por_fac = total_programas // NUM_FACULTADES
+    # 2) Lanzar todos los programas simultáneamente y registrar info inicial
+    procesos_info = lanzar_programas(
+        PROGS_POR_FAC,
+        NUM_FACULTADES,
+        BASE_PORT,
+        SEMESTRE,
+        lista_facultades
+    )
 
-        print(f"\n--- Escenario: {total_programas} programas totales "
-              f"({progs_por_fac} por facultad) ---")
+    total_lanzados = len(procesos_info)
+    codigos = []            # lista de exit codes (0 vs !=0)
+    pendientes = procesos_info.copy()
 
-        # 2) Lanzar todos los programas simultáneamente y registrar info inicial
-        procesos_info = lanzar_programas(
-            progs_por_fac,
-            NUM_FACULTADES,
-            BASE_PORT,
-            SEMESTRE,
-            lista_facultades
-        )
+    # 3) Esperar a que todos los procesos terminen (polling)
+    while pendientes:
+        time.sleep(0.05)  # evitamos busy-waiting excesivo
+        para_eliminar = []
+        ahora = time.time()
+        for entry in pendientes:
+            p = entry["proc"]
+            if p.poll() is not None:
+                # El proceso terminó; registramos su timestamp de finalización
+                entry["end"] = ahora
+                entry["duracion"] = entry["end"] - entry["start"]
+                codigos.append(p.returncode)
+                para_eliminar.append(entry)
+        for e in para_eliminar:
+            pendientes.remove(e)
 
-        total_lanzados = len(procesos_info)
-        # Variables para ir registrando métricas:
-        tiempos = []           # lista de tiempos individuales (float en segundos)
-        codigos = []           # lista de exit codes (0 vs !=0)
-        pendientes = procesos_info.copy()
+    # 4) Calcular métricas individuales
+    duraciones = [entry["duracion"] for entry in procesos_info]
+    if duraciones:
+        tiempo_medio = sum(duraciones) / len(duraciones)
+        tiempo_max   = max(duraciones)
+    else:
+        tiempo_medio = 0.0
+        tiempo_max   = 0.0
 
-        # 3) Esperar a que todos los procesos terminen (polling)
-        while pendientes:
-            time.sleep(0.05)  # evitamos busy-waiting excesivo
-            para_eliminar = []
-            ahora = time.time()
-            for entry in pendientes:
-                p = entry["proc"]
-                if p.poll() is not None:
-                    # Ya terminó; medir su tiempo de respuesta:
-                    t_proc = ahora - entry["start"]
-                    tiempos.append(t_proc)
-                    codigos.append(p.returncode)
-                    para_eliminar.append(entry)
-            # Sacamos los que ya terminamos de la lista "pendientes"
-            for e in para_eliminar:
-                pendientes.remove(e)
+    satisfechas    = sum(1 for c in codigos if c == 0)
+    no_satisfechas = sum(1 for c in codigos if c != 0)
 
-        # 4) Calcular métricas
-        if tiempos:
-            tiempo_medio = sum(tiempos) / len(tiempos)
-            tiempo_max   = max(tiempos)
-        else:
-            tiempo_medio = 0.0
-            tiempo_max   = 0.0
+    tiempo_primero = min(entry["start"] for entry in procesos_info)
+    tiempo_ultimo  = max(entry["end"]   for entry in procesos_info)
+    tiempo_total   = tiempo_ultimo - tiempo_primero
 
-        satisfechas    = sum(1 for c in codigos if c == 0)
-        no_satisfechas = sum(1 for c in codigos if c != 0)
+    # 5) Imprimir métricas del escenario
+    print(f"\n  • Programas Académicos que se usaron : { total_lanzados }")
+    print(f"  • Facultades que se usaron          : {', '.join(lista_facultades)}")
+    print(f"  • Tiempo medio de respuesta         : {tiempo_medio:.2f} segundos")
+    print(f"  • Tiempo máximo de respuesta        : {tiempo_max:.2f} segundos")
+    print(f"  • Peticiones satisfechas             : {satisfechas}")
+    print(f"  • Peticiones no satisfechas          : {no_satisfechas}")
+    print(f"  • Tiempo total (del primero al último) = {tiempo_total:.2f} segundos\n")
 
-        # El tiempo total real del escenario (desde el primero que arrancó hasta el último que terminó)
-        tiempo_primero = min(entry["start"] for entry in procesos_info)
-        tiempo_ultimo  = max(entry["start"] + t for entry, t in zip(procesos_info, tiempos))
-        tiempo_total   = tiempo_ultimo - tiempo_primero
-        resultados[total_programas] = tiempo_total
-
-        # 5) Imprimir todas las métricas del escenario
-        print(f"\n  • Programas Académicos que se usaron: { total_lanzados }")
-        print(f"  • Facultades que se usaron      : {', '.join(lista_facultades)}")
-        print(f"  • Tiempo medio de respuesta     : {tiempo_medio:.2f} segundos")
-        print(f"  • Tiempo máximo de respuesta    : {tiempo_max:.2f} segundos")
-        print(f"  • Peticiones satisfechas         : {satisfechas}")
-        print(f"  • Peticiones no satisfechas      : {no_satisfechas}")
-        print(f"  • Tiempo total (del primero al último) = {tiempo_total:.2f} segundos\n")
-
-    # 6) Después de todos los escenarios, terminar procesos de facultad
+    # 6) Después del escenario, terminar procesos de facultad
     print("Terminando procesos de facultad …")
     for p in facultad_procs:
         try:
-            # Enviar SIGINT primero para que cierren adecuadamente (si tienen handler)
+            # Enviar SIGINT para que cierren adecuadamente (si tienen handler)
             p.send_signal(signal.SIGINT)
             time.sleep(0.2)
             if p.poll() is None:
@@ -164,12 +157,7 @@ def main():
         except Exception:
             pass
 
-    # 7) Resumen final de tiempos totales por escenario
-    print("\n=== Resumen final de tiempos totales ===")
-    for total, t in resultados.items():
-        print(f"  • {total:>3d} programas → {t:.2f} segundos")
-
-    print("\n¡Simulación COMPLETADA con métricas!\n")
+    print("\n¡Simulación del escenario de 50 procesos COMPLETADA!\n")
 
 if __name__ == "__main__":
     try:
@@ -177,4 +165,3 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n[!] Ejecución interrumpida por el usuario.")
         sys.exit(1)
-

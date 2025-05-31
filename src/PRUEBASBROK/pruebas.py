@@ -1,111 +1,122 @@
+#!/usr/bin/env python3
 import subprocess
-import random
 import time
-import os
-import matplotlib.pyplot as plt
+import random
+import signal
+import sys
 
-# Configuración
-FACULTADES = 10
-PROGRAMAS_POR_FACULTAD = 5
-PUERTO_BASE = 6000
-
-# Limpiar archivo de resultados
-if os.path.exists("resultados.txt"):
-    os.remove("resultados.txt")
-
-# Iniciar facultades
-facultades_procs = []
-for i in range(FACULTADES):
-    puerto = PUERTO_BASE + i
-    cmd = [
-        "python", "facultad.py",
-        "-n", f"facultad_{i}",
-        "-s", "05-2025",
-        "-ip-p-b", "localhost:5553",
-        "-puerto-escuchar", str(puerto)
-    ]
-    p = subprocess.Popen(cmd)
-    facultades_procs.append(p)
-
-# Esperar que facultades inicien
-time.sleep(2)
-
-# Iniciar programas académicos
-programas_procs = []
-for i in range(FACULTADES):
-    for j in range(PROGRAMAS_POR_FACULTAD):
-        puerto = PUERTO_BASE + i
-        num_salones = random.randint(7, 10)
-        num_labs = random.randint(2, 4)
+def arrancar_facultades(num_facultades, base_port, broker_ip, semestre):
+    procesos = []
+    for i in range(num_facultades):
+        puerto = base_port + i
+        nombre_fac = f"facultad{i+1}"
         cmd = [
-            "python", "programa_academico.py",
-            "-n", f"programa_{i}_{j}",
-            "-s", "05-2025",
-            "-num-s", str(num_salones),
-            "-num-l", str(num_labs),
-            "-ip-p-f", f"localhost:{puerto}"
+            "python3", "facultad.py",
+            "-n", nombre_fac,
+            "-s", semestre,
+            "-ip-p-b", broker_ip,
+            "-puerto-escuchar", str(puerto)
         ]
-        p = subprocess.Popen(cmd)
-        programas_procs.append(p)
+        p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        procesos.append(p)
+        print(f"→ Arrancada {nombre_fac} en puerto {puerto}")
+    return procesos
 
-# Esperar que todos los programas terminen
-for p in programas_procs:
-    p.wait()
+def lanzar_programas(num_programas_por_facultad, num_facultades, base_port, semestre):
+    procesos = []
+    tiempos_individuales = []
 
-# Terminar facultades
-for p in facultades_procs:
-    p.terminate()
+    for i in range(num_facultades):
+        puerto_fac = base_port + i
+        for _ in range(num_programas_por_facultad):
+            num_s = random.randint(7, 10)
+            num_l = random.randint(2, 4)
+            cmd = [
+                "python3", "programa_academico.py",
+                "-n", "programa",
+                "-s", semestre,
+                "-num-s", str(num_s),
+                "-num-l", str(num_l),
+                "-ip-p-f", f"localhost:{puerto_fac}"
+            ]
 
-# Procesar resultados
-def procesar_resultados():
-    tiempos = []
-    satisfechas = 0
-    total = 0
-    
-    if not os.path.exists("resultados.txt"):
-        print("No se encontró el archivo de resultados")
-        return
-    
-    with open("resultados.txt", "r") as f:
-        for line in f:
-            partes = line.strip().split(',')
-            if len(partes) == 2:
-                tiempo = float(partes[0])
-                satisfecha = partes[1] == "True"
-                tiempos.append(tiempo)
-                total += 1
-                if satisfecha:
-                    satisfechas += 1
-    
-    no_satisfechas = total - satisfechas
-    
-    if total > 0:
-        tiempo_medio = sum(tiempos) / total
-        tiempo_max = max(tiempos)
-    else:
-        tiempo_medio = 0
-        tiempo_max = 0
-    
-    print("\n" + "="*50)
-    print("RESULTADOS DE LA SIMULACIÓN")
-    print("="*50)
-    print(f"Total de peticiones: {total}")
-    print(f"Tiempo medio de respuesta: {tiempo_medio:.6f} segundos")
-    print(f"Tiempo máximo de respuesta: {tiempo_max:.6f} segundos")
-    print(f"Peticiones satisfechas: {satisfechas}")
-    print(f"Peticiones no satisfechas: {no_satisfechas}")
-    print("="*50)
-    
-    # Gráfico de tiempos
-    plt.figure(figsize=(10, 6))
-    plt.plot(tiempos, 'o-')
-    plt.axhline(y=tiempo_medio, color='r', linestyle='--', label=f'Tiempo medio: {tiempo_medio:.4f}s')
-    plt.title('Tiempos de Respuesta de los Programas Académicos')
-    plt.xlabel('Número de Programa')
-    plt.ylabel('Tiempo (segundos)')
-    plt.legend()
-    plt.grid(True)
-    plt.savefig('tiempos_respuesta.png')
-    plt.show()
+            inicio = time.time()
+            # Usamos run() para medir el tiempo individual de cada proceso
+            p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            procesos.append((p, inicio))
 
-procesar_resultados()
+        print(f"   • Facultad {i+1} recibió {num_programas_por_facultad} solicitudes (puerto {puerto_fac})")
+
+    # Esperar todos los procesos, midiendo tiempos de finalización
+    for p, inicio in procesos:
+        p.wait()
+        fin = time.time()
+        tiempos_individuales.append(fin - inicio)
+
+    return tiempos_individuales
+
+def main():
+    NUM_FACULTADES = 10
+    BASE_PORT = 6000
+    BROKER_IP = "10.43.96.80:5553"
+    SEMESTRE = "05-2025"
+    ESCENARIOS = [50, 100, 200, 500]
+
+    print("\n=== Orquestador de simulación de solicitudes ===\n")
+
+    facultad_procs = arrancar_facultades(NUM_FACULTADES, BASE_PORT, BROKER_IP, SEMESTRE)
+    time.sleep(2)  # Esperamos a que las facultades estén listas
+
+    resultados = {}
+
+    for total_programas in ESCENARIOS:
+        progs_por_fac = total_programas // NUM_FACULTADES
+
+        print(f"\n--- Escenario: {total_programas} programas ({progs_por_fac} por facultad) ---")
+
+        start = time.time()
+        tiempos_individuales = lanzar_programas(progs_por_fac, NUM_FACULTADES, BASE_PORT, SEMESTRE)
+        total_elapsed = time.time() - start
+
+        tiempo_medio = sum(tiempos_individuales) / len(tiempos_individuales)
+        tiempo_max = max(tiempos_individuales)
+
+        resultados[total_programas] = {
+            "tiempo_total": total_elapsed,
+            "tiempo_medio": tiempo_medio,
+            "tiempo_max": tiempo_max,
+            "programas_usados": total_programas,
+            "facultades_usadas": NUM_FACULTADES
+        }
+
+        print(f">> Tiempo total: {total_elapsed:.2f} s")
+        print(f">> Tiempo medio por programa: {tiempo_medio:.2f} s")
+        print(f">> Tiempo máximo individual: {tiempo_max:.2f} s")
+
+    # Finalizar procesos de facultades
+    print("\nTerminando procesos de facultad …")
+    for p in facultad_procs:
+        try:
+            p.send_signal(signal.SIGINT)
+            time.sleep(0.2)
+            if p.poll() is None:
+                p.terminate()
+        except Exception:
+            pass
+
+    print("\n=== Resultados finales por escenario ===")
+    for total, datos in resultados.items():
+        print(f"\nEscenario con {total} programas académicos:")
+        print(f"  • Facultades utilizadas     : {datos['facultades_usadas']}")
+        print(f"  • Tiempo total              : {datos['tiempo_total']:.2f} s")
+        print(f"  • Tiempo medio por programa: {datos['tiempo_medio']:.2f} s")
+        print(f"  • Tiempo máximo observado  : {datos['tiempo_max']:.2f} s")
+
+    print("\n¡Simulación completada!\n")
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n[!] Ejecución interrumpida por el usuario.")
+        sys.exit(1)

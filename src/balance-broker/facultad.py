@@ -129,13 +129,13 @@ class Facultad:
     print(f"{MAGENTA}Enviando petición al broker...{RESET}")
     try:
         self.socket_broker.send_json(peticion_enviar)
-        if self.socket_broker.poll(timeout=5000):  # Timeout de 5 segundos
-            respuesta = self.socket_broker.recv_json()
-            print(f"{BLUE}Respuesta del broker: {respuesta}{RESET}")
-            return respuesta.get("respuesta", "").lower() == "y"
-        else:
-            print(f"{RED}Timeout: No se recibió respuesta del broker{RESET}")
-            return False
+        #if self.socket_broker.poll(timeout=5000):  # Timeout de 5 segundos
+        respuesta = self.socket_broker.recv_json()
+        print(f"{BLUE}Respuesta del broker: {respuesta}{RESET}")
+        return respuesta.get("respuesta", "").lower() == "y"
+        #else:
+        #    print(f"{RED}Timeout: No se recibió respuesta del broker{RESET}")
+        #    return False
     except Exception as e:
         print(f"{RED}Error al enviar petición al broker: {e}{RESET}")
         return False

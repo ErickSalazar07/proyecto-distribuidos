@@ -160,6 +160,10 @@ class Broker:
                         self.frontend.send_multipart([client_id, b"", reply])
                         print(f"{GREEN}Respuesta enviada al cliente {client_id}{RESET}")
 
+                        self.available_workers += 1
+                        self.workers_list.append(worker_id)
+                        print(f"{GREEN}Worker {worker_id} registrado como disponible{RESET}")
+
                 # Manejar mensajes del frontend (facultades/clients)
                 if self.frontend in socks and socks[self.frontend] == zmq.POLLIN:
                     if self.available_workers > 0:

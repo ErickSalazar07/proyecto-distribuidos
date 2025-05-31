@@ -1,0 +1,2 @@
+Salones: 0
+Laboratorios: 0

@@ -58,7 +58,7 @@ def main():
     # Parámetros generales
     NUM_FACULTADES = 10
     BASE_PORT       = 6000
-    BROKER_IP       = "10.43.96.80:5553"
+    BROKER_IP       = "10.43.96.80:5513"
     SEMESTRE        = "05-2025"
     # Escenarios: total de procesos de 'programa_academico.py'
     ESCENARIOS = [50, 100, 200, 500]

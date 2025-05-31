@@ -1,159 +1,128 @@
-#!/usr/bin/env python3xd
-import subprocess
+import socket
+import threading
 import time
 import random
-import signal
+import argparse
+from multiprocessing import Process, Queue
 import sys
 
-def arrancar_facultades(num_facultades, base_port, semestre):
-    """
-    Lanza num_facultades instancias de 'facultad.py', una por cada puerto
-    consecutivo a partir de base_port. Devuelve la lista de procesos Popen
-    y la lista de nombres de facultades.
-    """
-    procesos = []
-    nombres = []
-    for i in range(num_facultades):
-        puerto = base_port + i
-        nombre_fac = f"facultad{i+1}"
-        nombres.append(nombre_fac)
-        cmd = [
-            "python3", "facultad.py",
-            "-n", nombre_fac,
-            "-s", semestre,            # ignorado en el código, pero lo incluimos en la firma
-            "-ip-p-b", "IGNORADO",     # idem
-            "-puerto-escuchar", str(puerto)
-        ]
-        p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        procesos.append(p)
-        print(f"→ Arrancada {nombre_fac} en puerto {puerto}")
-    return procesos, nombres
+# Configuración de recursos por facultad
+AULAS_TOTALES = 30
+LABORATORIOS_TOTALES = 15
 
-def lanzar_programas(num_programas_por_facultad, num_facultades, base_port, semestre, facultades):
-    """
-    Por cada facultad (num_facultades), lanza num_programas_por_facultad
-    instancias de 'programa_academico.py' con parámetros aleatorios.
-    Devuelve una lista de diccionarios con:
-      - 'proc': objeto Popen
-      - 'start': timestamp
-      - 'facultad': nombre de la facultad
-      # 'end' se asignará cuando termine cada proceso
-    """
-    procesos_info = []
-    for i in range(num_facultades):
-        puerto_fac = base_port + i
-        nombre_fac = facultades[i]
-        for _ in range(num_programas_por_facultad):
-            num_s = random.randint(7, 10)   # aulas
-            num_l = random.randint(2, 4)    # laboratorios
-            cmd = [
-                "python3", "programa_academico.py",
-                "-n", "programa",
-                "-s", semestre,
-                "-num-s", str(num_s),
-                "-num-l", str(num_l),
-                "-ip-p-f", f"localhost:{puerto_fac}"
-            ]
-            start_time = time.time()
-            p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            procesos_info.append({
-                "proc":     p,
-                "start":    start_time,
-                "facultad": nombre_fac,
-            })
-        print(f"   • Facultad '{nombre_fac}' (puerto {puerto_fac}) recibió "
-              f"{num_programas_por_facultad} solicitudes.")
-    return procesos_info
+def run_facultad_server(puerto_escuchar):
+    aulas_disponibles = list(range(1, AULAS_TOTALES + 1))
+    laboratorios_disponibles = list(range(1, LABORATORIOS_TOTALES + 1))
+    lock = threading.Lock()
+
+    def handle_client(conn):
+        data = conn.recv(1024).decode()
+        try:
+            partes = data.split(';')
+            num_aulas = int(partes[0].split('=')[1])
+            num_labs = int(partes[1].split('=')[1])
+        except:
+            conn.send("rechazado".encode())
+            conn.close()
+            return
+
+        with lock:
+            if len(aulas_disponibles) >= num_aulas and len(laboratorios_disponibles) >= num_labs:
+                aulas_asignadas = aulas_disponibles[:num_aulas]
+                del aulas_disponibles[:num_aulas]
+                labs_asignados = laboratorios_disponibles[:num_labs]
+                del laboratorios_disponibles[:num_labs]
+                conn.send(f"asignadas: {aulas_asignadas} aulas, {labs_asignados} labs".encode())
+            else:
+                conn.send("rechazado".encode())
+        conn.close()
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(('0.0.0.0', puerto_escuchar))
+        s.listen()
+        while True:
+            conn, _ = s.accept()
+            threading.Thread(target=handle_client, args=(conn,)).start()
+
+def programa_academico(nombre, ip_p_f, result_queue):
+    num_aulas = random.randint(7, 10)
+    num_labs = random.randint(2, 4)
+    
+    try:
+        ip, port = ip_p_f.split(':')
+        port = int(port)
+    except:
+        result_queue.put((0.0, False))
+        return
+
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    start_time = time.perf_counter()
+    try:
+        s.connect((ip, port))
+        mensaje = f"aulas={num_aulas};laboratorios={num_labs}"
+        s.send(mensaje.encode())
+        respuesta = s.recv(1024).decode()
+        end_time = time.perf_counter()
+        duracion = end_time - start_time
+        satisfecha = "rechazado" not in respuesta
+        result_queue.put((duracion, satisfecha))
+    except:
+        result_queue.put((0.0, False))
+    finally:
+        s.close()
 
 def main():
-    # Parámetros generales
-    NUM_FACULTADES = 10
-    BASE_PORT       = 6000
-    SEMESTRE        = "05-2025"
+    # Configurar servidores
+    puertos = [6000 + i for i in range(10)]
+    servidores = []
+    for puerto in puertos:
+        p = Process(target=run_facultad_server, args=(puerto,))
+        p.daemon = True
+        p.start()
+        servidores.append(p)
+    
+    time.sleep(1)  # Esperar que servidores inicien
 
-    # Único escenario: 50 procesos → 5 por facultad
-    TOTAL_PROGRAMAS = 50
-    PROGS_POR_FAC   = TOTAL_PROGRAMAS // NUM_FACULTADES  # = 5
+    # Ejecutar clientes
+    resultados = Queue()
+    clientes = []
+    for i in range(50):
+        facultad_idx = i // 5
+        puerto = puertos[facultad_idx]
+        cliente = threading.Thread(
+            target=programa_academico,
+            args=(f"programa_{i}", f"localhost:{puerto}", resultados)
+        )
+        cliente.start()
+        clientes.append(cliente)
+    
+    for cliente in clientes:
+        cliente.join()
+    
+    # Recopilar resultados
+    tiempos = []
+    satisfechas = 0
+    total_peticiones = 50
+    
+    while not resultados.empty():
+        duracion, satisfecha = resultados.get()
+        tiempos.append(duracion)
+        if satisfecha:
+            satisfechas += 1
+    
+    no_satisfechas = total_peticiones - satisfechas
+    tiempo_medio = sum(tiempos) / total_peticiones
+    tiempo_max = max(tiempos)
+    
+    print("\n" + "="*50)
+    print("RESULTADOS DE LA SIMULACIÓN")
+    print("="*50)
+    print(f"Tiempo medio de respuesta: {tiempo_medio:.6f} segundos")
+    print(f"Tiempo máximo de respuesta: {tiempo_max:.6f} segundos")
+    print(f"Peticiones satisfechas: {satisfechas}")
+    print(f"Peticiones no satisfechas: {no_satisfechas}")
+    print("="*50)
 
-    print("\n=== Orquestador: escenario único de 50 procesos ===\n")
-
-    # 1) Arrancar facultades (puertos 6000..6009)
-    facultad_procs, lista_facultades = arrancar_facultades(
-        NUM_FACULTADES, BASE_PORT, SEMESTRE
-    )
-
-    # Esperar un par de segundos a que estén todas listas
-    time.sleep(2)
-
-    print(f"\n--- Escenario: {TOTAL_PROGRAMAS} procesos totales "
-          f"({PROGS_POR_FAC} por facultad) ---")
-
-    # 2) Lanzar programas en paralelo y guardar info
-    procesos_info = lanzar_programas(
-        PROGS_POR_FAC,
-        NUM_FACULTADES,
-        BASE_PORT,
-        SEMESTRE,
-        lista_facultades
-    )
-
-    total_lanzados = len(procesos_info)
-    codigos = []            # lista de exit codes (todos serán 0 ahora)
-    pendientes = procesos_info.copy()
-
-    # 3) Esperar a que terminen todos (polling)
-    while pendientes:
-        time.sleep(0.05)
-        para_eliminar = []
-        ahora = time.time()
-        for entry in pendientes:
-            p = entry["proc"]
-            if p.poll() is not None:
-                # Proceso terminado: guardar timestamp de finalización
-                entry["end"] = ahora
-                entry["duracion"] = entry["end"] - entry["start"]
-                codigos.append(p.returncode)  # siempre 0
-                para_eliminar.append(entry)
-        for e in para_eliminar:
-            pendientes.remove(e)
-
-    # 4) Calcular métricas individuales
-    duraciones = [entry["duracion"] for entry in procesos_info]
-    if duraciones:
-        tiempo_medio = sum(duraciones) / len(duraciones)
-        tiempo_max   = max(duraciones)
-    else:
-        tiempo_medio = 0.0
-        tiempo_max   = 0.0
-
-    # Ya no contamos satisfechas / no satisfechas, pues todo sale con 0
-    tiempo_primero = min(entry["start"] for entry in procesos_info)
-    tiempo_ultimo  = max(entry["end"]   for entry in procesos_info)
-    tiempo_total   = tiempo_ultimo - tiempo_primero
-
-    # 5) Imprimir métricas del escenario (sin mostrar peticiones satisfechas/no satisfechas)
-    print(f"\n  • Programas Académicos que se usaron : { total_lanzados }")
-    print(f"  • Facultades que se usaron          : {', '.join(lista_facultades)}")
-    print(f"  • Tiempo medio de respuesta         : {tiempo_medio:.2f} segundos")
-    print(f"  • Tiempo máximo de respuesta        : {tiempo_max:.2f} segundos")
-    print(f"  • Tiempo total (del primero al último) = {tiempo_total:.2f} segundos\n")
-
-    # 6) Terminar procesos de facultad
-    print("Terminando procesos de facultad …")
-    for p in facultad_procs:
-        try:
-            p.send_signal(signal.SIGINT)
-            time.sleep(0.2)
-            if p.poll() is None:
-                p.terminate()
-        except Exception:
-            pass
-
-    print("\n¡Simulación del escenario de 50 procesos COMPLETADA!\n")
-
-if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\n[!] Ejecución interrumpida por el usuario.")
-        sys.exit(1)
+if __name__ == '__main__':
+    main()

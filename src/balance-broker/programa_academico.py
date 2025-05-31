@@ -23,7 +23,7 @@ class ProgramaAcademico:
     self.ip_puerto_facultad = ""
     self.context = None
     self.socket_facultad = None
-
+    #python3 programa_academico.py -n programa -s 05-2025 -num-s 6 -num-l 2 -ip-p-f localhost:6000
     if len(sys.argv) != 11:
       print("Error: Ingreso un numero invalido de argumentos. Verifique.\n")
       self.error_args()
